@@ -5,6 +5,9 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization
 import base64
+import jwt
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.backends import default_backend
 
 class VCManager:
     def __init__(self):
@@ -35,8 +38,9 @@ class VCManager:
         # Create credential ID
         credential_id = f"vc:{base64.b64encode(subject_did.encode()).decode()[:16]}"
         
-        # Create credential
-        credential = {
+        # Create credential payload
+        now = datetime.utcnow()
+        payload = {
             "@context": [
                 "https://www.w3.org/2018/credentials/v1",
                 "https://www.w3.org/2018/credentials/examples/v1"
@@ -44,24 +48,40 @@ class VCManager:
             "id": credential_id,
             "type": ["VerifiableCredential", credential_type],
             "issuer": issuer_did,
-            "issuanceDate": datetime.utcnow().isoformat(),
-            "expirationDate": (datetime.utcnow() + timedelta(days=validity_days)).isoformat(),
+            "issuanceDate": now.isoformat(),
+            "expirationDate": (now + timedelta(days=validity_days)).isoformat(),
             "credentialSubject": {
                 "id": subject_did,
                 **attributes
             }
         }
         
-        # Sign the credential
-        signature = self._sign_credential(credential, private_key_pem)
+        # Load private key
+        private_key = serialization.load_pem_private_key(
+            private_key_pem.encode(),
+            password=None,
+            backend=default_backend()
+        )
         
-        # Add proof
-        credential["proof"] = {
-            "type": "RsaSignature2018",
-            "created": datetime.utcnow().isoformat(),
-            "proofPurpose": "assertionMethod",
-            "verificationMethod": f"{issuer_did}#keys-1",
-            "jws": signature
+        # Sign the credential using JWT
+        token = jwt.encode(
+            payload,
+            private_key,
+            algorithm='RS256',
+            headers={
+                'typ': 'JWT',
+                'alg': 'RS256',
+                'kid': f"{issuer_did}#keys-1"
+            }
+        )
+        
+        # Create the final credential
+        credential = {
+            **payload,
+            "proof": {
+                "type": "JwtProof2020",
+                "jwt": token
+            }
         }
         
         # Store the credential
@@ -88,12 +108,32 @@ class VCManager:
         if datetime.fromisoformat(credential["expirationDate"]) < datetime.utcnow():
             return False
         
-        # Verify signature
-        proof = credential.pop("proof")
         try:
-            return self._verify_signature(credential, proof["jws"], issuer_public_key_pem)
-        finally:
-            credential["proof"] = proof
+            # Load public key
+            public_key = serialization.load_pem_public_key(
+                issuer_public_key_pem.encode(),
+                backend=default_backend()
+            )
+            
+            # Verify JWT signature
+            token = credential["proof"]["jwt"]
+            payload = jwt.decode(
+                token,
+                public_key,
+                algorithms=['RS256'],
+                options={
+                    'verify_exp': False,  # We already checked expiration
+                    'verify_iat': True,
+                    'verify_iss': True,
+                    'verify_aud': False
+                }
+            )
+            
+            # Verify payload matches credential
+            return payload["id"] == credential["id"]
+            
+        except Exception:
+            return False
     
     def revoke_credential(self, credential_id: str) -> bool:
         """
@@ -108,14 +148,4 @@ class VCManager:
         if credential_id in self.issued_vcs:
             self.revoked_vcs.add(credential_id)
             return True
-        return False
-    
-    def _sign_credential(self, credential: dict, private_key_pem: str) -> str:
-        """Sign a credential using the issuer's private key."""
-        # Implementation of signing logic
-        pass
-    
-    def _verify_signature(self, credential: dict, signature: str, public_key_pem: str) -> bool:
-        """Verify a credential's signature using the issuer's public key."""
-        # Implementation of verification logic
-        pass 
+        return False 
