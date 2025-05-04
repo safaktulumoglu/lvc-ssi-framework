@@ -4,9 +4,9 @@ from typing import Optional, Dict
 import uvicorn
 from datetime import datetime
 
-from ..did.did_manager import DIDManager
-from ..vc.vc_manager import VCManager
-from ..zkp.zkp_prover import ZKPProver
+from src.did.did_manager import DIDManager
+from src.vc.vc_manager import VCManager
+from src.zkp.zkp_prover import ZKPProver
 
 class AccessRequest(BaseModel):
     proof_id: str
