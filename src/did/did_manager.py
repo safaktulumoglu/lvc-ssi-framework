@@ -4,6 +4,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 import json
 import base58
+import didkit
 
 class DIDManager:
     def __init__(self):
@@ -33,8 +34,8 @@ class DIDManager:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
         
-        # Create DID (using a simple method for demonstration)
-        did = f"did:lvc:{base58.b58encode(public_pem[:16]).decode()}"
+        # Create DID using didkit
+        did = didkit.key_to_did("key", public_pem)
         
         # Create DID document
         did_document = {
