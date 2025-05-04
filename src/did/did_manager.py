@@ -5,6 +5,7 @@ from cryptography.hazmat.backends import default_backend
 import json
 import base58
 import didkit
+import base64
 
 class DIDManager:
     def __init__(self):
@@ -34,8 +35,16 @@ class DIDManager:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
         
+        # Convert public key to JWK format
+        public_numbers = public_key.public_numbers()
+        jwk = {
+            "kty": "RSA",
+            "n": base64.urlsafe_b64encode(public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, 'big')).decode('utf-8').rstrip('='),
+            "e": base64.urlsafe_b64encode(public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, 'big')).decode('utf-8').rstrip('=')
+        }
+        
         # Create DID using didkit
-        did = didkit.key_to_did("key", public_pem)
+        did = didkit.key_to_did("key", json.dumps(jwk))
         
         # Create DID document
         did_document = {
