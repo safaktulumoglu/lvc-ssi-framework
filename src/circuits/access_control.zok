@@ -1,0 +1,10 @@
+def main(private field role, private field clearance_level, field required_role, field required_clearance) -> bool {
+    // Verify role matches required role
+    bool role_match = role == required_role;
+    
+    // Verify clearance level meets or exceeds required level
+    bool clearance_match = clearance_level >= required_clearance;
+    
+    // Access granted only if both conditions are met
+    return role_match && clearance_match;
+} 
