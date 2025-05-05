@@ -38,6 +38,7 @@ def compile_circuit():
     """Compile the ZoKrates circuit."""
     system = platform.system()
     circuit_dir = os.path.join('src', 'circuits')
+    abs_circuit_dir = os.path.abspath(circuit_dir)
     
     if system == "Windows":
         commands = [
@@ -49,11 +50,11 @@ def compile_circuit():
         # Use Docker for Linux/MacOS
         # Note: Using /home/zokrates/.zokrates/bin/zokrates for the executable path
         commands = [
-            ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code", 
+            ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
              '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'compile', '-i', 'access_control.zok'],
-            ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code", 
+            ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
              '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'setup'],
-            ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code', 
+            ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
              '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'export-verifier']
         ]
     
