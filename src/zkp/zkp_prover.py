@@ -1,6 +1,6 @@
 from typing import Dict, Any
 import json
-from zokrates_pycrypto import zk_prover
+from zokrates_pycrypto import zokrates
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import base64
@@ -28,22 +28,32 @@ class ZKPProver:
         public_inputs = self._prepare_public_inputs(credential)
         
         # Generate proof using ZoKrates
-        proof = zk_prover.generate_proof(
-            program_path=f"circuits/{proof_type}.zok",
-            public_inputs=public_inputs,
-            private_inputs=private_inputs
-        )
-        
-        # Cache the proof
-        proof_id = self._generate_proof_id(credential["id"], proof_type)
-        self.proof_cache[proof_id] = proof
-        
-        return {
-            "proof_id": proof_id,
-            "proof_type": proof_type,
-            "credential_id": credential["id"],
-            "proof": proof
-        }
+        try:
+            # Compile the circuit if not already compiled
+            zokrates.compile(f"circuits/{proof_type}.zok")
+            
+            # Setup the circuit
+            zokrates.setup()
+            
+            # Compute witness
+            zokrates.compute_witness(public_inputs, private_inputs)
+            
+            # Generate proof
+            proof = zokrates.generate_proof()
+            
+            # Cache the proof
+            proof_id = self._generate_proof_id(credential["id"], proof_type)
+            self.proof_cache[proof_id] = proof
+            
+            return {
+                "proof_id": proof_id,
+                "proof_type": proof_type,
+                "credential_id": credential["id"],
+                "proof": proof
+            }
+        except Exception as e:
+            print(f"Error generating proof: {str(e)}")
+            return None
     
     def verify_proof(self, 
                     proof: dict,
@@ -59,11 +69,7 @@ class ZKPProver:
             bool: True if valid, False otherwise
         """
         try:
-            return zk_prover.verify_proof(
-                program_path=f"circuits/{proof['proof_type']}.zok",
-                proof=proof["proof"],
-                public_inputs=public_inputs
-            )
+            return zokrates.verify_proof(proof["proof"], public_inputs)
         except Exception:
             return False
     
