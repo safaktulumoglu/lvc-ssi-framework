@@ -47,22 +47,31 @@ def compile_circuit():
         ]
     else:
         # Use Docker for Linux/MacOS
+        # Note: Using /home/zokrates/.zokrates/bin/zokrates for the executable path
         commands = [
             ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code", 
-             '-w', '/home/zokrates/code', 'zokrates/zokrates', 'compile', '-i', 'access_control.zok'],
+             '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'compile', '-i', 'access_control.zok'],
             ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code", 
-             '-w', '/home/zokrates/code', 'zokrates/zokrates', 'setup'],
-            ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code", 
-             '-w', '/home/zokrates/code', 'zokrates/zokrates', 'export-verifier']
+             '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'setup'],
+            ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code', 
+             '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'export-verifier']
         ]
     
     try:
         for cmd in commands:
-            subprocess.run(cmd, check=True)
+            print(f"Running command: {' '.join(cmd)}")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print(f"Command output: {result.stdout}")
+            if result.stderr:
+                print(f"Command stderr: {result.stderr}")
         print("Circuit compiled successfully")
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error compiling circuit: {str(e)}")
+        if e.stdout:
+            print(f"Command stdout: {e.stdout}")
+        if e.stderr:
+            print(f"Command stderr: {e.stderr}")
         return False
 
 def main():
