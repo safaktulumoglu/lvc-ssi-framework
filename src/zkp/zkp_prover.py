@@ -1,6 +1,7 @@
 from typing import Dict, Any
 import json
-from zokrates_pycrypto import zokrates
+import subprocess
+import os
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import base64
@@ -8,6 +9,7 @@ import base64
 class ZKPProver:
     def __init__(self):
         self.proof_cache: Dict[str, Any] = {}
+        self.working_dir = os.path.join(os.path.dirname(__file__), '..', 'circuits')
         
     def generate_proof(self, 
                       credential: dict,
@@ -24,22 +26,31 @@ class ZKPProver:
         Returns:
             dict: The generated proof
         """
-        # Convert credential to proof inputs
-        public_inputs = self._prepare_public_inputs(credential)
-        
-        # Generate proof using ZoKrates
         try:
-            # Compile the circuit if not already compiled
-            zokrates.compile(f"circuits/{proof_type}.zok")
+            # Convert credential to proof inputs
+            public_inputs = self._prepare_public_inputs(credential)
+            
+            # Prepare input files
+            circuit_path = os.path.join(self.working_dir, f"{proof_type}.zok")
+            witness_path = os.path.join(self.working_dir, f"{proof_type}.wtns")
+            proof_path = os.path.join(self.working_dir, f"{proof_type}.proof.json")
+            
+            # Compile the circuit
+            subprocess.run(['zokrates', 'compile', '-i', circuit_path], check=True)
             
             # Setup the circuit
-            zokrates.setup()
+            subprocess.run(['zokrates', 'setup'], check=True)
             
             # Compute witness
-            zokrates.compute_witness(public_inputs, private_inputs)
+            witness_input = json.dumps([*public_inputs.values(), *private_inputs.values()])
+            subprocess.run(['zokrates', 'compute-witness', '-a', *witness_input.split()], check=True)
             
             # Generate proof
-            proof = zokrates.generate_proof()
+            subprocess.run(['zokrates', 'generate-proof'], check=True)
+            
+            # Read the proof
+            with open(proof_path, 'r') as f:
+                proof = json.load(f)
             
             # Cache the proof
             proof_id = self._generate_proof_id(credential["id"], proof_type)
@@ -51,8 +62,11 @@ class ZKPProver:
                 "credential_id": credential["id"],
                 "proof": proof
             }
-        except Exception as e:
+        except subprocess.CalledProcessError as e:
             print(f"Error generating proof: {str(e)}")
+            return None
+        except Exception as e:
+            print(f"Unexpected error: {str(e)}")
             return None
     
     def verify_proof(self, 
@@ -69,7 +83,14 @@ class ZKPProver:
             bool: True if valid, False otherwise
         """
         try:
-            return zokrates.verify_proof(proof["proof"], public_inputs)
+            # Write proof to file
+            proof_path = os.path.join(self.working_dir, "temp.proof.json")
+            with open(proof_path, 'w') as f:
+                json.dump(proof["proof"], f)
+            
+            # Verify proof
+            result = subprocess.run(['zokrates', 'verify'], capture_output=True, text=True)
+            return result.returncode == 0
         except Exception:
             return False
     
