@@ -3,15 +3,86 @@ from src.vc.vc_manager import VCManager
 from src.zkp.zkp_prover import ZKPProver
 from src.sig.simulation_gateway import SimulationGateway
 import json
+import os
+import platform
+import subprocess
+
+def setup_zokrates():
+    """Setup ZoKrates based on the platform."""
+    system = platform.system()
+    
+    if system == "Windows":
+        # Check if ZoKrates is in PATH
+        try:
+            subprocess.run(['zokrates', '--version'], capture_output=True, check=True)
+            print("ZoKrates is already installed and in PATH")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print("Please install ZoKrates for Windows:")
+            print("1. Download from: https://github.com/Zokrates/ZoKrates/releases")
+            print("2. Extract the zip file")
+            print("3. Add the extracted directory to your system PATH")
+            print("4. Restart your terminal")
+            return False
+    else:
+        # For Linux/MacOS, use Docker
+        try:
+            subprocess.run(['docker', 'pull', 'zokrates/zokrates'], check=True)
+            print("ZoKrates Docker image pulled successfully")
+        except subprocess.CalledProcessError:
+            print("Failed to pull ZoKrates Docker image")
+            return False
+    
+    return True
+
+def compile_circuit():
+    """Compile the ZoKrates circuit."""
+    system = platform.system()
+    circuit_dir = os.path.join('src', 'circuits')
+    
+    if system == "Windows":
+        commands = [
+            ['zokrates', 'compile', '-i', 'access_control.zok'],
+            ['zokrates', 'setup'],
+            ['zokrates', 'export-verifier']
+        ]
+    else:
+        # Use Docker for Linux/MacOS
+        commands = [
+            ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code", 
+             '-w', '/home/zokrates/code', 'zokrates/zokrates', 'compile', '-i', 'access_control.zok'],
+            ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code", 
+             '-w', '/home/zokrates/code', 'zokrates/zokrates', 'setup'],
+            ['docker', 'run', '-v', f"{os.path.abspath(circuit_dir)}:/home/zokrates/code", 
+             '-w', '/home/zokrates/code', 'zokrates/zokrates', 'export-verifier']
+        ]
+    
+    try:
+        for cmd in commands:
+            subprocess.run(cmd, check=True)
+        print("Circuit compiled successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error compiling circuit: {str(e)}")
+        return False
 
 def main():
+    # Setup ZoKrates
+    if not setup_zokrates():
+        print("Failed to setup ZoKrates. Please follow the instructions above.")
+        return
+    
+    # Compile the circuit
+    if not compile_circuit():
+        print("Failed to compile the circuit. Please check the error messages above.")
+        return
+
     # Initialize components
     did_manager = DIDManager()
     vc_manager = VCManager()
     zkp_prover = ZKPProver()
     gateway = SimulationGateway()
 
-    print("=== Testing LVC-SSI Framework ===\n")
+    print("\n=== Testing LVC-SSI Framework ===\n")
 
     # 1. Create a DID for a simulation operator
     print("1. Creating DID for simulation operator...")
