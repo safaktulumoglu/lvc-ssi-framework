@@ -1,7 +1,7 @@
 from src.did.did_manager import DIDManager
 from src.vc.vc_manager import VCManager
 from src.zkp.zkp_prover import ZKPProver
-from src.sig.simulation_gateway import SimulationGateway
+from src.sig.simulation_gateway import SimulationGateway, AccessRequest
 import json
 import os
 import platform
@@ -155,18 +155,18 @@ async def main():
 
     # Test access request
     if proof is not None:
-        access_response = await gateway.handle_access_request({
-            "proof_id": proof["proof_id"],
-            "resource_id": "tactical_simulation",
-            "action": "execute"
-        })
+        access_response = await gateway.handle_access_request(AccessRequest(
+            proof_id=proof["proof_id"],
+            resource_id="tactical_simulation",
+            action="execute"
+        ))
     else:
         # Fallback to credential-based access control without ZKP
-        access_response = await gateway.handle_access_request({
-            "credential": credential,
-            "resource_id": "tactical_simulation",
-            "action": "execute"
-        })
+        access_response = await gateway.handle_access_request(AccessRequest(
+            credential=credential,
+            resource_id="tactical_simulation",
+            action="execute"
+        ))
     print(f"Access Response: {json.dumps(access_response.dict(), indent=2)}\n")
 
     # 6. View access logs
