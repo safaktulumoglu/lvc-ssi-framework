@@ -9,7 +9,8 @@ from src.vc.vc_manager import VCManager
 from src.zkp.zkp_prover import ZKPProver
 
 class AccessRequest(BaseModel):
-    proof_id: str
+    proof_id: Optional[str] = None
+    credential: Optional[dict] = None
     resource_id: str
     action: str
 
@@ -33,23 +34,14 @@ class SimulationGateway:
         
     async def handle_access_request(self, request: AccessRequest) -> AccessResponse:
         """
-        Handle an access request using ZKP verification.
+        Handle an access request using either ZKP verification or credential verification.
         
         Args:
-            request: Access request containing proof and resource details
+            request: Access request containing either proof_id or credential, and resource details
             
         Returns:
             AccessResponse: Result of the access request
         """
-        # Get the proof from cache
-        proof = self.zkp_prover.proof_cache.get(request.proof_id)
-        if not proof:
-            return AccessResponse(
-                granted=False,
-                reason="Invalid proof ID",
-                timestamp=datetime.utcnow().isoformat()
-            )
-        
         # Get access policy for the resource
         policy = self.access_policies.get(request.resource_id)
         if not policy:
@@ -59,27 +51,67 @@ class SimulationGateway:
                 timestamp=datetime.utcnow().isoformat()
             )
         
-        # Verify the proof
-        public_inputs = {
-            "resource_id": request.resource_id,
-            "action": request.action,
-            **policy["public_inputs"]
-        }
+        is_valid = False
+        reason = "Access denied"
         
-        is_valid = self.zkp_prover.verify_proof(proof, public_inputs)
+        if request.proof_id:
+            # ZKP-based access control
+            proof = self.zkp_prover.proof_cache.get(request.proof_id)
+            if not proof:
+                return AccessResponse(
+                    granted=False,
+                    reason="Invalid proof ID",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            # Verify the proof
+            public_inputs = {
+                "resource_id": request.resource_id,
+                "action": request.action,
+                **policy["public_inputs"]
+            }
+            
+            is_valid = self.zkp_prover.verify_proof(proof, public_inputs)
+            reason = "Access granted" if is_valid else "Invalid proof"
+            
+        elif request.credential:
+            # Credential-based access control
+            try:
+                # Verify the credential
+                is_valid = self.vc_manager.verify_credential(
+                    request.credential,
+                    self.did_manager.resolve_did(request.credential["issuer"])["verificationMethod"][0]["publicKeyPem"]
+                )
+                
+                if is_valid:
+                    # Check if credential attributes match policy requirements
+                    subject = request.credential["credentialSubject"]
+                    required_role = policy["public_inputs"]["required_role"]
+                    required_clearance = policy["public_inputs"]["required_clearance"]
+                    
+                    is_valid = (
+                        subject.get("role") == required_role and
+                        subject.get("clearance_level") == required_clearance
+                    )
+                    reason = "Access granted" if is_valid else "Credential attributes do not match policy"
+            except Exception as e:
+                is_valid = False
+                reason = f"Credential verification failed: {str(e)}"
         
         # Log the access attempt
         self.access_logs.append({
             "timestamp": datetime.utcnow().isoformat(),
             "proof_id": request.proof_id,
+            "credential_id": request.credential["id"] if request.credential else None,
             "resource_id": request.resource_id,
             "action": request.action,
-            "granted": is_valid
+            "granted": is_valid,
+            "reason": reason
         })
         
         return AccessResponse(
             granted=is_valid,
-            reason="Access granted" if is_valid else "Access denied",
+            reason=reason,
             timestamp=datetime.utcnow().isoformat()
         )
     
