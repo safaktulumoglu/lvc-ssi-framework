@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import subprocess
+import asyncio
 
 def setup_zokrates():
     """Setup ZoKrates based on the platform."""
@@ -75,7 +76,7 @@ def compile_circuit():
             print(f"Command stderr: {e.stderr}")
         return False
 
-def main():
+async def main():
     # Initialize components
     did_manager = DIDManager()
     vc_manager = VCManager()
@@ -154,14 +155,14 @@ def main():
 
     # Test access request
     if proof is not None:
-        access_response = gateway.handle_access_request({
+        access_response = await gateway.handle_access_request({
             "proof_id": proof["proof_id"],
             "resource_id": "tactical_simulation",
             "action": "execute"
         })
     else:
         # Fallback to credential-based access control without ZKP
-        access_response = gateway.handle_access_request({
+        access_response = await gateway.handle_access_request({
             "credential": credential,
             "resource_id": "tactical_simulation",
             "action": "execute"
@@ -174,4 +175,4 @@ def main():
     print(json.dumps(logs, indent=2))
 
 if __name__ == "__main__":
-    main() 
+    asyncio.run(main()) 
