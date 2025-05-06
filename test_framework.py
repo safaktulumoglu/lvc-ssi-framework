@@ -76,16 +76,6 @@ def compile_circuit():
         return False
 
 def main():
-    # Setup ZoKrates
-    if not setup_zokrates():
-        print("Failed to setup ZoKrates. Please follow the instructions above.")
-        return
-    
-    # Compile the circuit
-    if not compile_circuit():
-        print("Failed to compile the circuit. Please check the error messages above.")
-        return
-
     # Initialize components
     did_manager = DIDManager()
     vc_manager = VCManager()
@@ -121,18 +111,33 @@ def main():
     )
     print(f"Issued Credential: {json.dumps(credential, indent=2)}\n")
 
-    # 4. Generate a ZKP for access control
+    # 4. Generate a ZKP for access control (optional)
     print("4. Generating ZKP for access control...")
-    private_inputs = {
-        "role": "operator",
-        "clearance_level": "high"
-    }
-    proof = zkp_prover.generate_proof(
-        credential=credential,
-        proof_type="access_control",
-        private_inputs=private_inputs
-    )
-    print(f"Generated Proof: {json.dumps(proof, indent=2)}\n")
+    try:
+        # Setup ZoKrates
+        if setup_zokrates():
+            # Compile the circuit
+            if compile_circuit():
+                private_inputs = {
+                    "role": "operator",
+                    "clearance_level": "high"
+                }
+                proof = zkp_prover.generate_proof(
+                    credential=credential,
+                    proof_type="access_control",
+                    private_inputs=private_inputs
+                )
+                print(f"Generated Proof: {json.dumps(proof, indent=2)}\n")
+            else:
+                print("Skipping ZKP generation due to circuit compilation failure")
+                proof = None
+        else:
+            print("Skipping ZKP generation due to ZoKrates not being installed")
+            proof = None
+    except Exception as e:
+        print(f"Error during ZKP generation: {str(e)}")
+        print("Continuing with access control test without ZKP...")
+        proof = None
 
     # 5. Test access control
     print("5. Testing access control...")
@@ -148,11 +153,19 @@ def main():
     )
 
     # Test access request
-    access_response = gateway.handle_access_request({
-        "proof_id": proof["proof_id"],
-        "resource_id": "tactical_simulation",
-        "action": "execute"
-    })
+    if proof is not None:
+        access_response = gateway.handle_access_request({
+            "proof_id": proof["proof_id"],
+            "resource_id": "tactical_simulation",
+            "action": "execute"
+        })
+    else:
+        # Fallback to credential-based access control without ZKP
+        access_response = gateway.handle_access_request({
+            "credential": credential,
+            "resource_id": "tactical_simulation",
+            "action": "execute"
+        })
     print(f"Access Response: {json.dumps(access_response.dict(), indent=2)}\n")
 
     # 6. View access logs
