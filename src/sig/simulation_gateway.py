@@ -77,10 +77,22 @@ class SimulationGateway:
         elif request.credential:
             # Credential-based access control
             try:
+                # Get issuer's DID document
+                issuer_doc = self.did_manager.resolve_did(request.credential["issuer"])
+                if not issuer_doc:
+                    return AccessResponse(
+                        granted=False,
+                        reason="Issuer's DID document not found",
+                        timestamp=datetime.utcnow().isoformat()
+                    )
+                
+                # Get issuer's public key
+                issuer_public_key = issuer_doc["verificationMethod"][0]["publicKeyPem"]
+                
                 # Verify the credential
                 is_valid = self.vc_manager.verify_credential(
                     request.credential,
-                    self.did_manager.resolve_did(request.credential["issuer"])["verificationMethod"][0]["publicKeyPem"]
+                    issuer_public_key
                 )
                 
                 if is_valid:

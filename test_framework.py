@@ -167,11 +167,11 @@ async def main():
             resource_id="tactical_simulation",
             action="execute"
         ))
-    print(f"Access Response: {json.dumps(access_response.dict(), indent=2)}\n")
+    print(f"Access Response: {json.dumps(access_response.model_dump(), indent=2)}\n")
 
     # 6. View access logs
     print("6. Access Logs:")
-    logs = gateway.get_access_logs()
+    logs = await gateway.get_access_logs()
     print(json.dumps(logs, indent=2))
 
 if __name__ == "__main__":
