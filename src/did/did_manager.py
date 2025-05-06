@@ -35,6 +35,13 @@ class DIDManager:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
         
+        # Get private key in PEM format
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        
         # Convert public key to JWK format
         public_numbers = public_key.public_numbers()
         jwk = {
@@ -54,7 +61,8 @@ class DIDManager:
                 "id": f"{did}#keys-1",
                 "type": "RsaVerificationKey2018",
                 "controller": did,
-                "publicKeyPem": public_pem.decode()
+                "publicKeyPem": public_pem.decode(),
+                "privateKeyPem": private_pem.decode()
             }],
             "authentication": [f"{did}#keys-1"],
             "assertionMethod": [f"{did}#keys-1"],
