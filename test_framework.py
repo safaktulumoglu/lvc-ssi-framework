@@ -116,7 +116,7 @@ def main():
             "clearance_level": "high",
             "allowed_simulations": ["tactical", "strategic"]
         },
-        private_key_pem=commander_doc["verificationMethod"][0]["publicKeyPem"],
+        private_key_pem=commander_doc["verificationMethod"][0]["privateKeyPem"],
         validity_days=30
     )
     print(f"Issued Credential: {json.dumps(credential, indent=2)}\n")
