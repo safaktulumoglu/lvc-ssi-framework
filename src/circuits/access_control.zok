@@ -8,17 +8,21 @@ def main(
 ) -> bool {
     // Check if credential is expired
     field current_time = 1736112000; // Example timestamp (2025-01-06)
-    bool is_valid = expiration_date > current_time;
+    field time_diff = expiration_date - current_time;
+    bool is_valid = time_diff > 0;
     
     // Check if credential type matches
     field expected_type = 123456789; // Hash of "simulation_access"
-    bool is_simulation_access = credential_type == expected_type;
+    field type_diff = credential_type - expected_type;
+    bool is_simulation_access = type_diff == 0;
     
     // Check role and clearance level
     field expected_role = 1; // 1 = operator
     field expected_clearance = 3; // 3 = high
-    bool has_valid_role = role == expected_role;
-    bool has_valid_clearance = clearance_level == expected_clearance;
+    field role_diff = role - expected_role;
+    field clearance_diff = clearance_level - expected_clearance;
+    bool has_valid_role = role_diff == 0;
+    bool has_valid_clearance = clearance_diff == 0;
     
     // Grant access if all conditions are met
     bool access_granted = is_valid && is_simulation_access && has_valid_role && has_valid_clearance;
