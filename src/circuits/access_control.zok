@@ -11,12 +11,16 @@ def main(
     bool is_valid = expiration_date > current_time;
     
     // Check if credential type matches
-    bool is_simulation_access = credential_type == 123456789; // Hash of "simulation_access"
+    field expected_type = 123456789; // Hash of "simulation_access"
+    bool is_simulation_access = credential_type == expected_type;
     
     // Check role and clearance level
-    bool has_valid_role = role == 1; // 1 = operator
-    bool has_valid_clearance = clearance_level == 3; // 3 = high
+    field expected_role = 1; // 1 = operator
+    field expected_clearance = 3; // 3 = high
+    bool has_valid_role = role == expected_role;
+    bool has_valid_clearance = clearance_level == expected_clearance;
     
     // Grant access if all conditions are met
-    return is_valid && is_simulation_access && has_valid_role && has_valid_clearance;
+    bool access_granted = is_valid && is_simulation_access && has_valid_role && has_valid_clearance;
+    return access_granted;
 } 
