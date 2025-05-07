@@ -6,10 +6,33 @@ import json
 import base58
 import didkit
 import base64
+import os
 
 class DIDManager:
     def __init__(self):
         self.did_documents: Dict[str, dict] = {}
+        self.storage_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'did_documents.json')
+        self._load_documents()
+        
+    def _load_documents(self):
+        """Load DID documents from storage file."""
+        try:
+            os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
+            if os.path.exists(self.storage_file):
+                with open(self.storage_file, 'r') as f:
+                    self.did_documents = json.load(f)
+        except Exception as e:
+            print(f"Error loading DID documents: {str(e)}")
+            self.did_documents = {}
+            
+    def _save_documents(self):
+        """Save DID documents to storage file."""
+        try:
+            os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
+            with open(self.storage_file, 'w') as f:
+                json.dump(self.did_documents, f, indent=2)
+        except Exception as e:
+            print(f"Error saving DID documents: {str(e)}")
         
     def create_did(self, participant_type: str) -> tuple[str, dict]:
         """
@@ -71,6 +94,7 @@ class DIDManager:
         
         # Store DID document
         self.did_documents[did] = did_document
+        self._save_documents()
         
         return did, did_document
     
@@ -98,5 +122,6 @@ class DIDManager:
         """
         if did in self.did_documents:
             del self.did_documents[did]
+            self._save_documents()
             return True
         return False 

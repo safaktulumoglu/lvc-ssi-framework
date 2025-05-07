@@ -2,6 +2,7 @@ from typing import Dict, Any
 import json
 import subprocess
 import os
+import platform
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import base64
@@ -10,6 +11,16 @@ class ZKPProver:
     def __init__(self):
         self.proof_cache: Dict[str, Any] = {}
         self.working_dir = os.path.join(os.path.dirname(__file__), '..', 'circuits')
+        self.abs_working_dir = os.path.abspath(self.working_dir)
+        
+    def _run_zokrates_command(self, command: list) -> subprocess.CompletedProcess:
+        """Run a ZoKrates command using Docker."""
+        docker_cmd = [
+            'docker', 'run', '-v', f'{self.abs_working_dir}:/home/zokrates/code',
+            '-w', '/home/zokrates/code', 'zokrates/zokrates',
+            '/home/zokrates/.zokrates/bin/zokrates'
+        ] + command
+        return subprocess.run(docker_cmd, check=True, capture_output=True, text=True)
         
     def generate_proof(self, 
                       credential: dict,
@@ -31,25 +42,25 @@ class ZKPProver:
             public_inputs = self._prepare_public_inputs(credential)
             
             # Prepare input files
-            circuit_path = os.path.join(self.working_dir, f"{proof_type}.zok")
-            witness_path = os.path.join(self.working_dir, f"{proof_type}.wtns")
-            proof_path = os.path.join(self.working_dir, f"{proof_type}.proof.json")
+            circuit_path = f"{proof_type}.zok"
+            witness_path = f"{proof_type}.wtns"
+            proof_path = f"{proof_type}.proof.json"
             
             # Compile the circuit
-            subprocess.run(['zokrates', 'compile', '-i', circuit_path], check=True)
+            self._run_zokrates_command(['compile', '-i', circuit_path])
             
             # Setup the circuit
-            subprocess.run(['zokrates', 'setup'], check=True)
+            self._run_zokrates_command(['setup'])
             
             # Compute witness
             witness_input = json.dumps([*public_inputs.values(), *private_inputs.values()])
-            subprocess.run(['zokrates', 'compute-witness', '-a', *witness_input.split()], check=True)
+            self._run_zokrates_command(['compute-witness', '-a', *witness_input.split()])
             
             # Generate proof
-            subprocess.run(['zokrates', 'generate-proof'], check=True)
+            self._run_zokrates_command(['generate-proof'])
             
             # Read the proof
-            with open(proof_path, 'r') as f:
+            with open(os.path.join(self.working_dir, proof_path), 'r') as f:
                 proof = json.load(f)
             
             # Cache the proof
@@ -64,6 +75,10 @@ class ZKPProver:
             }
         except subprocess.CalledProcessError as e:
             print(f"Error generating proof: {str(e)}")
+            if e.stdout:
+                print(f"Command stdout: {e.stdout}")
+            if e.stderr:
+                print(f"Command stderr: {e.stderr}")
             return None
         except Exception as e:
             print(f"Unexpected error: {str(e)}")
@@ -89,9 +104,10 @@ class ZKPProver:
                 json.dump(proof["proof"], f)
             
             # Verify proof
-            result = subprocess.run(['zokrates', 'verify'], capture_output=True, text=True)
+            result = self._run_zokrates_command(['verify'])
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            print(f"Error verifying proof: {str(e)}")
             return False
     
     def _prepare_public_inputs(self, credential: dict) -> dict:
