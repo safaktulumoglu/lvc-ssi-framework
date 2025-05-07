@@ -52,14 +52,44 @@ class ZKPProver:
             # Setup the circuit
             self._run_zokrates_command(['setup'])
             
-            # Prepare witness input as a list of values
+            # Convert inputs to field elements (integers)
+            # For credential_id, use a hash of the string
+            credential_id_hash = int.from_bytes(
+                hashes.Hash(hashes.SHA256()).update(public_inputs["credential_id"].encode()).finalize()[:8],
+                byteorder='big'
+            )
+            
+            # For issuer, use a hash of the DID
+            issuer_hash = int.from_bytes(
+                hashes.Hash(hashes.SHA256()).update(public_inputs["issuer"].encode()).finalize()[:8],
+                byteorder='big'
+            )
+            
+            # For expiration_date, convert to Unix timestamp
+            from datetime import datetime
+            expiration_timestamp = int(datetime.fromisoformat(public_inputs["expiration_date"]).timestamp())
+            
+            # For credential_type, use a hash
+            type_hash = int.from_bytes(
+                hashes.Hash(hashes.SHA256()).update(public_inputs["credential_type"].encode()).finalize()[:8],
+                byteorder='big'
+            )
+            
+            # For role and clearance_level, use simple integer mappings
+            role_map = {"operator": 1, "commander": 2, "analyst": 3}
+            clearance_map = {"low": 1, "medium": 2, "high": 3}
+            
+            role_value = role_map.get(private_inputs["role"], 0)
+            clearance_value = clearance_map.get(private_inputs["clearance_level"], 0)
+            
+            # Prepare witness input as a list of field elements
             witness_values = [
-                public_inputs["credential_id"],
-                public_inputs["issuer"],
-                public_inputs["expiration_date"],
-                public_inputs["credential_type"],
-                private_inputs["role"],
-                private_inputs["clearance_level"]
+                str(credential_id_hash),
+                str(issuer_hash),
+                str(expiration_timestamp),
+                str(type_hash),
+                str(role_value),
+                str(clearance_value)
             ]
             
             # Compute witness with properly formatted arguments

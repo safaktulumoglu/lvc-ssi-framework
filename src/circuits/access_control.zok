@@ -1,10 +1,22 @@
-def main(private field role, private field clearance_level, field required_role, field required_clearance) -> bool {
-    // Verify role matches required role
-    bool role_match = role == required_role;
+def main(
+    private credential_id: field,
+    private issuer: field,
+    private expiration_date: field,
+    private credential_type: field,
+    private role: field,
+    private clearance_level: field
+) -> bool {
+    // Check if credential is expired
+    let current_time: u32 = 1736112000; // Example timestamp (2025-01-06)
+    let is_valid: bool = expiration_date > current_time;
     
-    // Verify clearance level meets or exceeds required level
-    bool clearance_match = clearance_level >= required_clearance;
+    // Check if credential type matches
+    let is_simulation_access: bool = credential_type == 123456789; // Hash of "simulation_access"
     
-    // Access granted only if both conditions are met
-    return role_match && clearance_match;
+    // Check role and clearance level
+    let has_valid_role: bool = role == 1; // 1 = operator
+    let has_valid_clearance: bool = clearance_level == 3; // 3 = high
+    
+    // Grant access if all conditions are met
+    return is_valid && is_simulation_access && has_valid_role && has_valid_clearance;
 } 
