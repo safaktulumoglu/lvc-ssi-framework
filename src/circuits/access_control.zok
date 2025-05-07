@@ -7,15 +7,15 @@ def main(
     private field clearance_level
 ) -> bool {
     // Check if credential is expired
-    let current_time: u32 = 1736112000; // Example timestamp (2025-01-06)
-    let is_valid: bool = expiration_date > current_time;
+    field current_time = 1736112000; // Example timestamp (2025-01-06)
+    bool is_valid = expiration_date > current_time;
     
     // Check if credential type matches
-    let is_simulation_access: bool = credential_type == 123456789; // Hash of "simulation_access"
+    bool is_simulation_access = credential_type == 123456789; // Hash of "simulation_access"
     
     // Check role and clearance level
-    let has_valid_role: bool = role == 1; // 1 = operator
-    let has_valid_clearance: bool = clearance_level == 3; // 3 = high
+    bool has_valid_role = role == 1; // 1 = operator
+    bool has_valid_clearance = clearance_level == 3; // 3 = high
     
     // Grant access if all conditions are met
     return is_valid && is_simulation_access && has_valid_role && has_valid_clearance;
