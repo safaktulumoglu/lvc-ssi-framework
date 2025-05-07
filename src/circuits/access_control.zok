@@ -1,10 +1,10 @@
 def main(
-    private credential_id: field,
-    private issuer: field,
-    private expiration_date: field,
-    private credential_type: field,
-    private role: field,
-    private clearance_level: field
+    private field credential_id,
+    private field issuer,
+    private field expiration_date,
+    private field credential_type,
+    private field role,
+    private field clearance_level
 ) -> bool {
     // Check if credential is expired
     let current_time: u32 = 1736112000; // Example timestamp (2025-01-06)
