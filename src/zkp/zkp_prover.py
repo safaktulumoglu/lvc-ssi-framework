@@ -52,9 +52,18 @@ class ZKPProver:
             # Setup the circuit
             self._run_zokrates_command(['setup'])
             
-            # Compute witness
-            witness_input = json.dumps([*public_inputs.values(), *private_inputs.values()])
-            self._run_zokrates_command(['compute-witness', '-a', *witness_input.split()])
+            # Prepare witness input as a list of values
+            witness_values = [
+                public_inputs["credential_id"],
+                public_inputs["issuer"],
+                public_inputs["expiration_date"],
+                public_inputs["credential_type"],
+                private_inputs["role"],
+                private_inputs["clearance_level"]
+            ]
+            
+            # Compute witness with properly formatted arguments
+            self._run_zokrates_command(['compute-witness', '-a'] + witness_values)
             
             # Generate proof
             self._run_zokrates_command(['generate-proof'])

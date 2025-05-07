@@ -17,10 +17,18 @@ class DIDManager:
     def _load_documents(self):
         """Load DID documents from storage file."""
         try:
+            # Ensure data directory exists
             os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
+            
+            # Load existing documents if file exists
             if os.path.exists(self.storage_file):
                 with open(self.storage_file, 'r') as f:
-                    self.did_documents = json.load(f)
+                    loaded_docs = json.load(f)
+                    if isinstance(loaded_docs, dict):
+                        self.did_documents = loaded_docs
+                    else:
+                        print("Warning: Invalid DID documents format in storage file")
+                        self.did_documents = {}
         except Exception as e:
             print(f"Error loading DID documents: {str(e)}")
             self.did_documents = {}
@@ -28,11 +36,26 @@ class DIDManager:
     def _save_documents(self):
         """Save DID documents to storage file."""
         try:
+            # Ensure data directory exists
             os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
+            
+            # Save documents with pretty printing
             with open(self.storage_file, 'w') as f:
                 json.dump(self.did_documents, f, indent=2)
+                
+            # Verify the save was successful
+            if not os.path.exists(self.storage_file):
+                raise Exception("Failed to create storage file")
+                
+            # Verify the content was written correctly
+            with open(self.storage_file, 'r') as f:
+                saved_docs = json.load(f)
+                if not isinstance(saved_docs, dict):
+                    raise Exception("Invalid document format after save")
+                    
         except Exception as e:
             print(f"Error saving DID documents: {str(e)}")
+            raise  # Re-raise to handle in calling code
         
     def create_did(self, participant_type: str) -> tuple[str, dict]:
         """
@@ -44,59 +67,64 @@ class DIDManager:
         Returns:
             tuple: (DID string, DID document)
         """
-        # Generate RSA key pair
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
-        )
-        
-        # Get public key in PEM format
-        public_key = private_key.public_key()
-        public_pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        
-        # Get private key in PEM format
-        private_pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
-        )
-        
-        # Convert public key to JWK format
-        public_numbers = public_key.public_numbers()
-        jwk = {
-            "kty": "RSA",
-            "n": base64.urlsafe_b64encode(public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, 'big')).decode('utf-8').rstrip('='),
-            "e": base64.urlsafe_b64encode(public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, 'big')).decode('utf-8').rstrip('=')
-        }
-        
-        # Create DID using didkit
-        did = didkit.key_to_did("key", json.dumps(jwk))
-        
-        # Create DID document
-        did_document = {
-            "@context": "https://www.w3.org/ns/did/v1",
-            "id": did,
-            "verificationMethod": [{
-                "id": f"{did}#keys-1",
-                "type": "RsaVerificationKey2018",
-                "controller": did,
-                "publicKeyPem": public_pem.decode(),
-                "privateKeyPem": private_pem.decode()
-            }],
-            "authentication": [f"{did}#keys-1"],
-            "assertionMethod": [f"{did}#keys-1"],
-            "participantType": participant_type
-        }
-        
-        # Store DID document
-        self.did_documents[did] = did_document
-        self._save_documents()
-        
-        return did, did_document
+        try:
+            # Generate RSA key pair
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=default_backend()
+            )
+            
+            # Get public key in PEM format
+            public_key = private_key.public_key()
+            public_pem = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            
+            # Get private key in PEM format
+            private_pem = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+            
+            # Convert public key to JWK format
+            public_numbers = public_key.public_numbers()
+            jwk = {
+                "kty": "RSA",
+                "n": base64.urlsafe_b64encode(public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, 'big')).decode('utf-8').rstrip('='),
+                "e": base64.urlsafe_b64encode(public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, 'big')).decode('utf-8').rstrip('=')
+            }
+            
+            # Create DID using didkit
+            did = didkit.key_to_did("key", json.dumps(jwk))
+            
+            # Create DID document
+            did_document = {
+                "@context": "https://www.w3.org/ns/did/v1",
+                "id": did,
+                "verificationMethod": [{
+                    "id": f"{did}#keys-1",
+                    "type": "RsaVerificationKey2018",
+                    "controller": did,
+                    "publicKeyPem": public_pem.decode(),
+                    "privateKeyPem": private_pem.decode()
+                }],
+                "authentication": [f"{did}#keys-1"],
+                "assertionMethod": [f"{did}#keys-1"],
+                "participantType": participant_type
+            }
+            
+            # Store DID document
+            self.did_documents[did] = did_document
+            self._save_documents()
+            
+            return did, did_document
+            
+        except Exception as e:
+            print(f"Error creating DID: {str(e)}")
+            raise
     
     def resolve_did(self, did: str) -> Optional[dict]:
         """
@@ -108,7 +136,18 @@ class DIDManager:
         Returns:
             dict: The DID document if found, None otherwise
         """
-        return self.did_documents.get(did)
+        # Try to load from memory first
+        doc = self.did_documents.get(did)
+        if doc:
+            return doc
+            
+        # If not in memory, try to load from storage
+        try:
+            self._load_documents()
+            return self.did_documents.get(did)
+        except Exception as e:
+            print(f"Error resolving DID: {str(e)}")
+            return None
     
     def revoke_did(self, did: str) -> bool:
         """
@@ -120,8 +159,12 @@ class DIDManager:
         Returns:
             bool: True if successful, False otherwise
         """
-        if did in self.did_documents:
-            del self.did_documents[did]
-            self._save_documents()
-            return True
-        return False 
+        try:
+            if did in self.did_documents:
+                del self.did_documents[did]
+                self._save_documents()
+                return True
+            return False
+        except Exception as e:
+            print(f"Error revoking DID: {str(e)}")
+            return False 
