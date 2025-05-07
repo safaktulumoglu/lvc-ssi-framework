@@ -32,5 +32,11 @@ def main(
     bool access_granted = is_valid && is_simulation_access && has_valid_role && has_valid_clearance;
     assert(access_granted == (is_valid && is_simulation_access && has_valid_role && has_valid_clearance));
     
+    // Ensure all variables are used in constraints
+    field temp1 = credential_id * 1;
+    field temp2 = issuer * 1;
+    assert(temp1 == credential_id);
+    assert(temp2 == issuer);
+    
     return access_granted;
 } 
