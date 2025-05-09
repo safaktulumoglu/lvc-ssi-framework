@@ -92,7 +92,7 @@ class ZKPProver:
                 str(clearance_value)
             ]
             
-            # Compute witness with properly formatted arguments
+            # Compute witness
             self._run_zokrates_command(['compute-witness', '-a'] + witness_values)
             
             # Generate proof
