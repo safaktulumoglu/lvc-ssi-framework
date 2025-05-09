@@ -54,26 +54,23 @@ class ZKPProver:
             
             # Convert inputs to field elements (integers)
             # For credential_id, use a hash of the string
-            credential_id_hash = int.from_bytes(
-                hashes.Hash(hashes.SHA256()).update(public_inputs["credential_id"].encode()).finalize()[:8],
-                byteorder='big'
-            )
+            hash_obj = hashes.Hash(hashes.SHA256())
+            hash_obj.update(public_inputs["credential_id"].encode())
+            credential_id_hash = int.from_bytes(hash_obj.finalize()[:8], byteorder='big')
             
             # For issuer, use a hash of the DID
-            issuer_hash = int.from_bytes(
-                hashes.Hash(hashes.SHA256()).update(public_inputs["issuer"].encode()).finalize()[:8],
-                byteorder='big'
-            )
+            hash_obj = hashes.Hash(hashes.SHA256())
+            hash_obj.update(public_inputs["issuer"].encode())
+            issuer_hash = int.from_bytes(hash_obj.finalize()[:8], byteorder='big')
             
             # For expiration_date, convert to Unix timestamp
             from datetime import datetime
             expiration_timestamp = int(datetime.fromisoformat(public_inputs["expiration_date"]).timestamp())
             
             # For credential_type, use a hash
-            type_hash = int.from_bytes(
-                hashes.Hash(hashes.SHA256()).update(public_inputs["credential_type"].encode()).finalize()[:8],
-                byteorder='big'
-            )
+            hash_obj = hashes.Hash(hashes.SHA256())
+            hash_obj.update(public_inputs["credential_type"].encode())
+            type_hash = int.from_bytes(hash_obj.finalize()[:8], byteorder='big')
             
             # For role and clearance_level, use simple integer mappings
             role_map = {"operator": 1, "commander": 2, "analyst": 3}
