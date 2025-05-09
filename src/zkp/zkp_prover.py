@@ -46,10 +46,16 @@ class ZKPProver:
             witness_path = os.path.join(self.working_dir, f"{proof_type}.wtns")
             proof_path = os.path.join(self.working_dir, f"{proof_type}.proof.json")
             
+            print(f"Circuit path: {circuit_path}")
+            print(f"Witness path: {witness_path}")
+            print(f"Proof path: {proof_path}")
+            
             # Compile the circuit
+            print("Compiling circuit...")
             self._run_zokrates_command(['compile', '-i', os.path.basename(circuit_path)])
             
             # Setup the circuit
+            print("Setting up circuit...")
             self._run_zokrates_command(['setup'])
             
             # Convert inputs to field elements (integers)
@@ -89,19 +95,26 @@ class ZKPProver:
                 str(clearance_value)
             ]
             
+            print("Witness values:", witness_values)
+            
             # Compute witness
+            print("Computing witness...")
             witness_result = self._run_zokrates_command(['compute-witness', '-a'] + witness_values)
             if witness_result.returncode != 0:
                 print(f"Error computing witness: {witness_result.stderr}")
                 return None
-                
+            print("Witness computation successful")
+            
             # Generate proof
+            print("Generating proof...")
             proof_result = self._run_zokrates_command(['generate-proof'])
             if proof_result.returncode != 0:
                 print(f"Error generating proof: {proof_result.stderr}")
                 return None
+            print("Proof generation successful")
             
             # Export verifier
+            print("Exporting verifier...")
             self._run_zokrates_command(['export-verifier'])
             
             # Read the proof
@@ -113,6 +126,8 @@ class ZKPProver:
                     proof_path = alt_proof_path
                 else:
                     print("Proof file not found in working directory either")
+                    print("Current directory contents:")
+                    print(os.listdir(self.working_dir))
                     return None
                 
             with open(proof_path, 'r') as f:
