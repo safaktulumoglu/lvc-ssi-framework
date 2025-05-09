@@ -95,10 +95,18 @@ class ZKPProver:
             # Generate proof
             self._run_zokrates_command(['generate-proof'])
             
+            # Export verifier
+            self._run_zokrates_command(['export-verifier'])
+            
             # Read the proof
             if not os.path.exists(proof_path):
                 print(f"Proof file not found at: {proof_path}")
-                return None
+                print("Checking for proof file in working directory...")
+                alt_proof_path = os.path.join(self.working_dir, f"{proof_type}.proof.json")
+                if os.path.exists(alt_proof_path):
+                    proof_path = alt_proof_path
+                else:
+                    return None
                 
             with open(proof_path, 'r') as f:
                 proof = json.load(f)
