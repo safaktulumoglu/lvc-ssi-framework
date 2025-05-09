@@ -81,7 +81,7 @@ async def main():
     did_manager = DIDManager()
     vc_manager = VCManager()
     zkp_prover = ZKPProver()
-    gateway = SimulationGateway()
+    gateway = SimulationGateway(zkp_prover=zkp_prover)
 
     print("\n=== Testing LVC-SSI Framework ===\n")
 

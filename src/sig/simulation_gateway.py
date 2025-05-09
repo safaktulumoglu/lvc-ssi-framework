@@ -20,11 +20,11 @@ class AccessResponse(BaseModel):
     timestamp: str
 
 class SimulationGateway:
-    def __init__(self):
+    def __init__(self, zkp_prover=None):
         self.app = FastAPI(title="LVC-SSI Simulation Gateway")
         self.did_manager = DIDManager()
         self.vc_manager = VCManager()
-        self.zkp_prover = ZKPProver()
+        self.zkp_prover = zkp_prover if zkp_prover is not None else ZKPProver()
         self.access_policies: Dict[str, dict] = {}
         self.access_logs: list = []
         
