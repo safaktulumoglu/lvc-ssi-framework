@@ -41,13 +41,13 @@ class ZKPProver:
             # Convert credential to proof inputs
             public_inputs = self._prepare_public_inputs(credential)
             
-            # Prepare input files
-            circuit_path = f"{proof_type}.zok"
-            witness_path = f"{proof_type}.wtns"
-            proof_path = f"{proof_type}.proof.json"
+            # Prepare input files with absolute paths
+            circuit_path = os.path.join(self.working_dir, f"{proof_type}.zok")
+            witness_path = os.path.join(self.working_dir, f"{proof_type}.wtns")
+            proof_path = os.path.join(self.working_dir, f"{proof_type}.proof.json")
             
             # Compile the circuit
-            self._run_zokrates_command(['compile', '-i', circuit_path])
+            self._run_zokrates_command(['compile', '-i', os.path.basename(circuit_path)])
             
             # Setup the circuit
             self._run_zokrates_command(['setup'])
@@ -96,7 +96,11 @@ class ZKPProver:
             self._run_zokrates_command(['generate-proof'])
             
             # Read the proof
-            with open(os.path.join(self.working_dir, proof_path), 'r') as f:
+            if not os.path.exists(proof_path):
+                print(f"Proof file not found at: {proof_path}")
+                return None
+                
+            with open(proof_path, 'r') as f:
                 proof = json.load(f)
             
             # Cache the proof
