@@ -155,6 +155,8 @@ async def main():
 
     # Test access request
     if proof is not None:
+        print(f"Using proof ID: {proof['proof_id']}")
+        print(f"Proof cache contents: {list(zkp_prover.proof_cache.keys())}")
         access_response = await gateway.handle_access_request(AccessRequest(
             proof_id=proof["proof_id"],
             resource_id="tactical_simulation",
@@ -162,6 +164,7 @@ async def main():
         ))
     else:
         # Fallback to credential-based access control without ZKP
+        print("Falling back to credential-based access control")
         access_response = await gateway.handle_access_request(AccessRequest(
             credential=credential,
             resource_id="tactical_simulation",
@@ -169,7 +172,7 @@ async def main():
         ))
     print(f"Access Response: {json.dumps(access_response.model_dump(), indent=2)}\n")
 
-    # 6. View access logs
+    # 6. Access Logs
     print("6. Access Logs:")
     logs = await gateway.get_access_logs()
     print(json.dumps(logs, indent=2))

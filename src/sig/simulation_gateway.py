@@ -56,6 +56,9 @@ class SimulationGateway:
         
         if request.proof_id:
             # ZKP-based access control
+            print(f"Verifying proof with ID: {request.proof_id}")
+            print(f"Available proof IDs: {list(self.zkp_prover.proof_cache.keys())}")
+            
             proof = self.zkp_prover.proof_cache.get(request.proof_id)
             if not proof:
                 return AccessResponse(
@@ -71,8 +74,10 @@ class SimulationGateway:
                 **policy["public_inputs"]
             }
             
+            print(f"Verifying proof with inputs: {public_inputs}")
             is_valid = self.zkp_prover.verify_proof(proof, public_inputs)
             reason = "Access granted" if is_valid else "Invalid proof"
+            print(f"Proof verification result: {is_valid}")
             
         elif request.credential:
             # Credential-based access control
@@ -111,7 +116,7 @@ class SimulationGateway:
                 reason = f"Credential verification failed: {str(e)}"
         
         # Log the access attempt
-        self.access_logs.append({
+        log_entry = {
             "timestamp": datetime.utcnow().isoformat(),
             "proof_id": request.proof_id,
             "credential_id": request.credential["id"] if request.credential else None,
@@ -119,7 +124,9 @@ class SimulationGateway:
             "action": request.action,
             "granted": is_valid,
             "reason": reason
-        })
+        }
+        self.access_logs.append(log_entry)
+        print(f"Access log entry: {log_entry}")
         
         return AccessResponse(
             granted=is_valid,
