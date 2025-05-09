@@ -90,10 +90,16 @@ class ZKPProver:
             ]
             
             # Compute witness
-            self._run_zokrates_command(['compute-witness', '-a'] + witness_values)
-            
+            witness_result = self._run_zokrates_command(['compute-witness', '-a'] + witness_values)
+            if witness_result.returncode != 0:
+                print(f"Error computing witness: {witness_result.stderr}")
+                return None
+                
             # Generate proof
-            self._run_zokrates_command(['generate-proof'])
+            proof_result = self._run_zokrates_command(['generate-proof'])
+            if proof_result.returncode != 0:
+                print(f"Error generating proof: {proof_result.stderr}")
+                return None
             
             # Export verifier
             self._run_zokrates_command(['export-verifier'])
@@ -106,6 +112,7 @@ class ZKPProver:
                 if os.path.exists(alt_proof_path):
                     proof_path = alt_proof_path
                 else:
+                    print("Proof file not found in working directory either")
                     return None
                 
             with open(proof_path, 'r') as f:
