@@ -44,7 +44,7 @@ class ZKPProver:
             # Prepare input files with absolute paths
             circuit_path = os.path.join(self.working_dir, f"{proof_type}.zok")
             witness_path = os.path.join(self.working_dir, f"{proof_type}.wtns")
-            proof_path = os.path.join(self.working_dir, f"{proof_type}.proof.json")
+            proof_path = os.path.join(self.working_dir, "proof.json")  # ZoKrates default name
             
             print(f"Circuit path: {circuit_path}")
             print(f"Witness path: {witness_path}")
@@ -121,14 +121,9 @@ class ZKPProver:
             if not os.path.exists(proof_path):
                 print(f"Proof file not found at: {proof_path}")
                 print("Checking for proof file in working directory...")
-                alt_proof_path = os.path.join(self.working_dir, f"{proof_type}.proof.json")
-                if os.path.exists(alt_proof_path):
-                    proof_path = alt_proof_path
-                else:
-                    print("Proof file not found in working directory either")
-                    print("Current directory contents:")
-                    print(os.listdir(self.working_dir))
-                    return None
+                print("Current directory contents:")
+                print(os.listdir(self.working_dir))
+                return None
                 
             with open(proof_path, 'r') as f:
                 proof = json.load(f)
