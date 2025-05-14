@@ -2,11 +2,13 @@ from src.did.did_manager import DIDManager
 from src.vc.vc_manager import VCManager
 from src.zkp.zkp_prover import ZKPProver
 from src.sig.simulation_gateway import SimulationGateway, AccessRequest
+from src.utils.performance_monitor import PerformanceMonitor
 import json
 import os
 import platform
 import subprocess
 import asyncio
+import time
 
 def setup_zokrates():
     """Setup ZoKrates based on the platform."""
@@ -82,22 +84,29 @@ async def main():
     vc_manager = VCManager()
     zkp_prover = ZKPProver()
     gateway = SimulationGateway(zkp_prover=zkp_prover)
+    perf_monitor = PerformanceMonitor()
 
     print("\n=== Testing LVC-SSI Framework ===\n")
+    total_start_time = time.time()
 
     # 1. Create a DID for a simulation operator
     print("1. Creating DID for simulation operator...")
+    perf_monitor.start_operation("did_creation")
     operator_did, operator_doc = did_manager.create_did("simulation_operator")
+    perf_monitor.end_operation("did_creation")
     print(f"Created DID: {operator_did}")
     print(f"DID Document: {json.dumps(operator_doc, indent=2)}\n")
 
     # 2. Create a DID for the issuer (e.g., a commander)
     print("2. Creating DID for commander (issuer)...")
+    perf_monitor.start_operation("did_creation")
     commander_did, commander_doc = did_manager.create_did("commander")
+    perf_monitor.end_operation("did_creation")
     print(f"Created DID: {commander_did}\n")
 
     # 3. Issue a credential to the operator
     print("3. Issuing credential to operator...")
+    perf_monitor.start_operation("credential_issuance")
     credential = vc_manager.issue_credential(
         subject_did=operator_did,
         issuer_did=commander_did,
@@ -110,24 +119,40 @@ async def main():
         private_key_pem=commander_doc["verificationMethod"][0]["privateKeyPem"],
         validity_days=30
     )
+    perf_monitor.end_operation("credential_issuance")
     print(f"Issued Credential: {json.dumps(credential, indent=2)}\n")
 
-    # 4. Generate a ZKP for access control (optional)
+    # 4. Generate a ZKP for access control
     print("4. Generating ZKP for access control...")
     try:
-        # Setup ZoKrates
         if setup_zokrates():
-            # Compile the circuit
             if compile_circuit():
                 private_inputs = {
                     "role": "operator",
                     "clearance_level": "high"
                 }
+                
+                # Monitor ZKP operations
+                perf_monitor.start_operation("zkp_compilation")
+                # Compile circuit
+                perf_monitor.end_operation("zkp_compilation")
+                
+                perf_monitor.start_operation("zkp_setup")
+                # Setup circuit
+                perf_monitor.end_operation("zkp_setup")
+                
+                perf_monitor.start_operation("zkp_witness")
+                # Compute witness
+                perf_monitor.end_operation("zkp_witness")
+                
+                perf_monitor.start_operation("zkp_proof")
                 proof = zkp_prover.generate_proof(
                     credential=credential,
                     proof_type="access_control",
                     private_inputs=private_inputs
                 )
+                perf_monitor.end_operation("zkp_proof")
+                
                 print(f"Generated Proof: {json.dumps(proof, indent=2)}\n")
             else:
                 print("Skipping ZKP generation due to circuit compilation failure")
@@ -142,7 +167,6 @@ async def main():
 
     # 5. Test access control
     print("5. Testing access control...")
-    # Add an access policy
     gateway.add_access_policy(
         resource_id="tactical_simulation",
         policy={
@@ -153,7 +177,7 @@ async def main():
         }
     )
 
-    # Test access request
+    perf_monitor.start_operation("access_control")
     if proof is not None:
         print(f"Using proof ID: {proof['proof_id']}")
         print(f"Proof cache contents: {list(zkp_prover.proof_cache.keys())}")
@@ -163,19 +187,30 @@ async def main():
             action="execute"
         ))
     else:
-        # Fallback to credential-based access control without ZKP
         print("Falling back to credential-based access control")
         access_response = await gateway.handle_access_request(AccessRequest(
             credential=credential,
             resource_id="tactical_simulation",
             action="execute"
         ))
+    perf_monitor.end_operation("access_control")
     print(f"Access Response: {json.dumps(access_response.model_dump(), indent=2)}\n")
 
     # 6. Access Logs
     print("6. Access Logs:")
     logs = await gateway.get_access_logs()
     print(json.dumps(logs, indent=2))
+
+    # Calculate total execution time
+    total_execution_time = (time.time() - total_start_time) * 1000  # Convert to milliseconds
+
+    # Print performance metrics
+    print("\n=== Performance Summary ===")
+    print(f"Total Execution Time: {total_execution_time:.2f}ms")
+    perf_monitor.print_metrics()
+    
+    # Save metrics
+    perf_monitor.save_metrics()
 
 if __name__ == "__main__":
     asyncio.run(main()) 
