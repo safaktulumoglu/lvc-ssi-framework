@@ -1,0 +1,55 @@
+{
+  "timestamp": "2025-05-14T20:02:02.594586",
+  "metrics": {
+    "did_creation": {
+      "min": 500.0,
+      "max": 500.0,
+      "avg": 500.0,
+      "count": 2,
+      "total": 1000.0
+    },
+    "credential_issuance": {
+      "min": 1000.0,
+      "max": 1000.0,
+      "avg": 1000.0,
+      "count": 1,
+      "total": 1000.0
+    },
+    "zkp_compilation": {
+      "min": 2000.0,
+      "max": 2000.0,
+      "avg": 2000.0,
+      "count": 1,
+      "total": 2000.0
+    },
+    "zkp_setup": {
+      "min": 3000.0,
+      "max": 3000.0,
+      "avg": 3000.0,
+      "count": 1,
+      "total": 3000.0
+    },
+    "zkp_witness": {
+      "min": 1000.0,
+      "max": 1000.0,
+      "avg": 1000.0,
+      "count": 1,
+      "total": 1000.0
+    },
+    "zkp_proof": {
+      "min": 2000.0,
+      "max": 2000.0,
+      "avg": 2000.0,
+      "count": 1,
+      "total": 2000.0
+    },
+    "access_control": {
+      "min": 49.0,
+      "max": 49.0,
+      "avg": 49.0,
+      "count": 1,
+      "total": 49.0
+    }
+  },
+  "total_execution_time": 8785.0
+} 
