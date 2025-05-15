@@ -38,15 +38,15 @@ async def main():
             private_key_pem = commander_doc["verificationMethod"][0]["privateKeyPem"]
             
             credential = await vc_manager.issue_credential(
-                subject_did=operator_did,
-                issuer_did=commander_did,
-                credential_type="SimulationAccess",
-                attributes={
+                operator_did,  # subject_did
+                commander_did,  # issuer_did
+                "SimulationAccess",  # credential_type
+                {  # attributes
                     "role": "simulation_operator",
                     "clearance": "top_secret",
                     "simulations": ["tactical", "strategic"]
                 },
-                private_key_pem=private_key_pem
+                private_key_pem  # private_key_pem as positional argument
             )
             print(f"Issued Credential: {json.dumps(credential, indent=2)}")
         
