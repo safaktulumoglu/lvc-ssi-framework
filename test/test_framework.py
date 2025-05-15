@@ -38,8 +38,8 @@ async def main():
             private_key_pem = commander_doc["verificationMethod"][0]["privateKeyPem"]
             
             credential = await vc_manager.issue_credential(
+                subject_did=operator_did,
                 issuer_did=commander_did,
-                holder_did=operator_did,
                 credential_type="SimulationAccess",
                 attributes={
                     "role": "simulation_operator",
