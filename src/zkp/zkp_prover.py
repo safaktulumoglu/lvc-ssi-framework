@@ -25,6 +25,11 @@ class ZKPProver:
         self._setup_cache = {}
         self._circuit_dir = Path(__file__).parent.parent / "circuits"
         self._circuit_dir.mkdir(exist_ok=True)
+        self._proof_cache_lock = threading.Lock()
+        self._circuit_lock = threading.Lock()
+        self.compiled_circuits = {}
+        self.setup_done = {}
+        self.proof_cache = {}
     
     def __del__(self):
         """Cleanup thread pool executor on deletion."""
