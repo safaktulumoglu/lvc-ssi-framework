@@ -22,8 +22,8 @@ async def main():
     # Create DIDs for simulation operator and commander
     print("\n1. Creating DIDs...")
     with perf_monitor.measure("did_creation"):
-        operator_did = await did_manager.create_did("Simulation Operator")
-        commander_did = await did_manager.create_did("Commander")
+        operator_did, operator_doc = await did_manager.create_did("Simulation Operator")
+        commander_did, commander_doc = await did_manager.create_did("Commander")
     
     print(f"Operator DID: {operator_did}")
     print(f"Commander DID: {commander_did}")
@@ -39,7 +39,8 @@ async def main():
                 "role": "operator",
                 "clearance": "top_secret",
                 "simulations": ["tactical", "strategic"]
-            }
+            },
+            private_key_pem=commander_doc["verificationMethod"][0]["privateKeyPem"]
         )
     
     print(f"Issued credential: {json.dumps(credential, indent=2)}")
