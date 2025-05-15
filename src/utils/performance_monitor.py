@@ -1,47 +1,49 @@
 import time
-from typing import Dict, List
-from datetime import datetime
+from typing import Dict, Any
+from contextlib import contextmanager
 import json
 import os
+from datetime import datetime
 
 class PerformanceMonitor:
     def __init__(self):
-        self.metrics: Dict[str, List[float]] = {
-            "did_creation": [],
-            "credential_issuance": [],
-            "zkp_compilation": [],
-            "zkp_setup": [],
-            "zkp_witness": [],
-            "zkp_proof": [],
-            "access_control": []
-        }
-        self.start_times: Dict[str, float] = {}
+        self.metrics: Dict[str, Dict[str, Any]] = {}
+        self.start_time = time.time()
         self.log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'performance_logs.json')
         
-    def start_operation(self, operation: str):
-        """Start timing an operation."""
-        self.start_times[operation] = time.time()
-        
-    def end_operation(self, operation: str):
-        """End timing an operation and record the duration in milliseconds."""
-        if operation in self.start_times:
-            duration = (time.time() - self.start_times[operation]) * 1000  # Convert to milliseconds
-            self.metrics[operation].append(duration)
-            del self.start_times[operation]
+    @contextmanager
+    def measure(self, operation: str):
+        """Measure the execution time of an operation."""
+        start = time.time()
+        try:
+            yield
+        finally:
+            end = time.time()
+            duration = (end - start) * 1000  # Convert to milliseconds
             
-    def get_metrics(self) -> Dict[str, Dict[str, float]]:
-        """Get performance metrics with statistics in milliseconds."""
-        stats = {}
-        for operation, durations in self.metrics.items():
-            if durations:
-                stats[operation] = {
-                    "min": min(durations),
-                    "max": max(durations),
-                    "avg": sum(durations) / len(durations),
-                    "count": len(durations),
-                    "total": sum(durations)
+            if operation not in self.metrics:
+                self.metrics[operation] = {
+                    "count": 0,
+                    "min": float('inf'),
+                    "max": float('-inf'),
+                    "total": 0,
+                    "avg": 0
                 }
-        return stats
+            
+            metrics = self.metrics[operation]
+            metrics["count"] += 1
+            metrics["min"] = min(metrics["min"], duration)
+            metrics["max"] = max(metrics["max"], duration)
+            metrics["total"] += duration
+            metrics["avg"] = metrics["total"] / metrics["count"]
+    
+    def get_metrics(self) -> Dict[str, Dict[str, Any]]:
+        """Get all performance metrics."""
+        return self.metrics
+    
+    def get_total_time(self) -> float:
+        """Get total execution time in milliseconds."""
+        return (time.time() - self.start_time) * 1000
     
     def save_metrics(self):
         """Save metrics to file."""
@@ -67,6 +69,6 @@ class PerformanceMonitor:
     def get_total_execution_time(self) -> float:
         """Get total execution time in milliseconds."""
         total = 0
-        for operation, durations in self.metrics.items():
-            total += sum(durations)
+        for operation, metrics in self.metrics.items():
+            total += metrics["total"]
         return total 
