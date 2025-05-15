@@ -245,9 +245,9 @@ class ZKPProver:
         try:
             print(f"Computing witness for {circuit_name}")  # Debug logging
             
-            # Convert all inputs to strings and join them with spaces
-            input_args = ' '.join(str(x) for x in witness_inputs)
-            print(f"Input arguments: {input_args}")  # Debug logging
+            # Convert all inputs to strings
+            input_args = [str(x) for x in witness_inputs]
+            print(f"Input arguments: {' '.join(input_args)}")  # Debug logging
             
             result = await loop.run_in_executor(
                 self._executor,
@@ -256,7 +256,7 @@ class ZKPProver:
                     '-i', circuit_path.name,
                     '-o', witness_path.name,
                     '-a'
-                ] + [input_args])
+                ] + input_args)
             )
             
             if result.returncode != 0:
