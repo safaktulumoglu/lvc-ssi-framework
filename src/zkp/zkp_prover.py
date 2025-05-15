@@ -32,18 +32,23 @@ class ZKPProver:
         self.proof_cache = {}
         self._witness_cache = {}
         self._verifier_cache = {}
+        self._timeout = 30  # Default timeout in seconds
         
         # Ensure Docker is available
         try:
-            subprocess.run(['docker', '--version'], check=True, capture_output=True)
+            subprocess.run(['docker', '--version'], check=True, capture_output=True, timeout=5)
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise RuntimeError("Docker is required but not found. Please install Docker first.")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Docker check timed out. Please ensure Docker is running.")
         
         # Pull ZoKrates image if not present
         try:
-            subprocess.run(['docker', 'pull', 'zokrates/zokrates'], check=True, capture_output=True)
+            subprocess.run(['docker', 'pull', 'zokrates/zokrates'], check=True, capture_output=True, timeout=60)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to pull ZoKrates Docker image: {e.stderr.decode()}")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Docker pull timed out. Please check your internet connection.")
     
     def __del__(self):
         """Cleanup thread pool executor on deletion."""
@@ -57,16 +62,21 @@ class ZKPProver:
             return hashlib.sha256(f.read()).hexdigest()
     
     def _run_zokrates_command(self, command: list) -> subprocess.CompletedProcess:
-        """Run a ZoKrates command using Docker."""
+        """Run a ZoKrates command using Docker with timeout."""
         docker_cmd = [
             'docker', 'run', '-v', f'{self._circuit_dir}:/home/zokrates/code',
             '-w', '/home/zokrates/code', 'zokrates/zokrates',
             '/home/zokrates/.zokrates/bin/zokrates'
         ] + command
-        return subprocess.run(docker_cmd, check=True, capture_output=True, text=True)
+        try:
+            return subprocess.run(docker_cmd, check=True, capture_output=True, text=True, timeout=self._timeout)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"ZoKrates command timed out after {self._timeout} seconds")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"ZoKrates command failed: {e.stderr}")
     
     async def _compile_circuit(self, circuit_name: str) -> str:
-        """Compile a circuit using Docker with enhanced caching."""
+        """Compile a circuit using Docker with enhanced caching and timeout."""
         circuit_path = self._circuit_dir / f"{circuit_name}.zok"
         if not circuit_path.exists():
             raise FileNotFoundError(f"Circuit file not found: {circuit_path}")
@@ -76,54 +86,66 @@ class ZKPProver:
         if file_hash in self._circuit_cache:
             return self._circuit_cache[file_hash]
         
-        # Use circuit lock for thread safety
-        with self._circuit_lock:
-            if file_hash in self._circuit_cache:
-                return self._circuit_cache[file_hash]
-            
-            # Compile circuit using Docker
-            loop = asyncio.get_event_loop()
-            try:
-                result = await loop.run_in_executor(
-                    self._executor,
-                    lambda: self._run_zokrates_command(['compile', '-i', circuit_path.name])
-                )
-                if result.returncode != 0:
-                    raise RuntimeError(f"Failed to compile circuit: {result.stderr}")
+        # Use circuit lock for thread safety with timeout
+        try:
+            with self._circuit_lock:
+                if file_hash in self._circuit_cache:
+                    return self._circuit_cache[file_hash]
                 
-                self._circuit_cache[file_hash] = str(circuit_path)
-                return str(circuit_path)
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(f"Failed to compile circuit: {e.stderr}")
+                # Compile circuit using Docker
+                loop = asyncio.get_event_loop()
+                try:
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            self._executor,
+                            lambda: self._run_zokrates_command(['compile', '-i', circuit_path.name])
+                        ),
+                        timeout=self._timeout
+                    )
+                    if result.returncode != 0:
+                        raise RuntimeError(f"Failed to compile circuit: {result.stderr}")
+                    
+                    self._circuit_cache[file_hash] = str(circuit_path)
+                    return str(circuit_path)
+                except asyncio.TimeoutError:
+                    raise RuntimeError(f"Circuit compilation timed out after {self._timeout} seconds")
+        except Exception as e:
+            raise RuntimeError(f"Error compiling circuit: {str(e)}")
     
     async def _setup_circuit(self, circuit_name: str) -> str:
-        """Set up a circuit using Docker with enhanced caching."""
-        circuit_path = await self._compile_circuit(circuit_name)
-        
-        # Check cache with file hash
-        file_hash = self._get_file_hash(circuit_path)
-        if file_hash in self._setup_cache:
-            return self._setup_cache[file_hash]
-        
-        # Use circuit lock for thread safety
-        with self._circuit_lock:
+        """Set up a circuit using Docker with enhanced caching and timeout."""
+        try:
+            circuit_path = await self._compile_circuit(circuit_name)
+            
+            # Check cache with file hash
+            file_hash = self._get_file_hash(circuit_path)
             if file_hash in self._setup_cache:
                 return self._setup_cache[file_hash]
             
-            # Setup circuit using Docker
-            loop = asyncio.get_event_loop()
-            try:
-                result = await loop.run_in_executor(
-                    self._executor,
-                    lambda: self._run_zokrates_command(['setup'])
-                )
-                if result.returncode != 0:
-                    raise RuntimeError(f"Failed to setup circuit: {result.stderr}")
+            # Use circuit lock for thread safety with timeout
+            with self._circuit_lock:
+                if file_hash in self._setup_cache:
+                    return self._setup_cache[file_hash]
                 
-                self._setup_cache[file_hash] = str(circuit_path)
-                return str(circuit_path)
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(f"Failed to setup circuit: {e.stderr}")
+                # Setup circuit using Docker
+                loop = asyncio.get_event_loop()
+                try:
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            self._executor,
+                            lambda: self._run_zokrates_command(['setup'])
+                        ),
+                        timeout=self._timeout
+                    )
+                    if result.returncode != 0:
+                        raise RuntimeError(f"Failed to setup circuit: {result.stderr}")
+                    
+                    self._setup_cache[file_hash] = str(circuit_path)
+                    return str(circuit_path)
+                except asyncio.TimeoutError:
+                    raise RuntimeError(f"Circuit setup timed out after {self._timeout} seconds")
+        except Exception as e:
+            raise RuntimeError(f"Error setting up circuit: {str(e)}")
     
     async def _compute_witness(self, circuit_name: str, inputs: Dict[str, Any]) -> str:
         """Compute witness using Docker with caching."""
@@ -172,7 +194,7 @@ class ZKPProver:
             raise RuntimeError(f"Failed to compute witness: {e.stderr}")
     
     async def generate_proof(self, credential: Dict[str, Any], proof_type: str, private_inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Generate a zero-knowledge proof with optimized caching."""
+        """Generate a zero-knowledge proof with optimized caching and timeout handling."""
         try:
             # Check cache first
             proof_id = self._generate_proof_id(credential["id"], proof_type)
@@ -189,28 +211,37 @@ class ZKPProver:
             public_inputs = self._prepare_public_inputs(credential)
             witness_inputs = {**public_inputs, **private_inputs}
             
-            # Run circuit compilation, setup, and witness computation in parallel
-            circuit_task = asyncio.create_task(self._compile_circuit(proof_type))
-            setup_task = asyncio.create_task(self._setup_circuit(proof_type))
-            witness_task = asyncio.create_task(self._compute_witness(proof_type, witness_inputs))
-            
-            # Wait for all tasks to complete
-            circuit_path, setup_path, witness_path = await asyncio.gather(
-                circuit_task, setup_task, witness_task
-            )
+            # Run circuit compilation, setup, and witness computation in parallel with timeout
+            try:
+                circuit_task = asyncio.create_task(self._compile_circuit(proof_type))
+                setup_task = asyncio.create_task(self._setup_circuit(proof_type))
+                witness_task = asyncio.create_task(self._compute_witness(proof_type, witness_inputs))
+                
+                # Wait for all tasks to complete with timeout
+                circuit_path, setup_path, witness_path = await asyncio.wait_for(
+                    asyncio.gather(circuit_task, setup_task, witness_task),
+                    timeout=self._timeout * 3  # Allow more time for parallel operations
+                )
+            except asyncio.TimeoutError:
+                raise RuntimeError(f"Proof generation timed out after {self._timeout * 3} seconds")
+            except Exception as e:
+                raise RuntimeError(f"Error during proof generation setup: {str(e)}")
             
             # Generate proof using Docker
             proof_path = self._circuit_dir / "proof.json"
             loop = asyncio.get_event_loop()
             try:
-                result = await loop.run_in_executor(
-                    self._executor,
-                    lambda: self._run_zokrates_command([
-                        'generate-proof',
-                        '-i', circuit_path.name,
-                        '-w', witness_path.name,
-                        '-p', proof_path.name
-                    ])
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        self._executor,
+                        lambda: self._run_zokrates_command([
+                            'generate-proof',
+                            '-i', circuit_path.name,
+                            '-w', witness_path.name,
+                            '-p', proof_path.name
+                        ])
+                    ),
+                    timeout=self._timeout
                 )
                 if result.returncode != 0:
                     raise RuntimeError(f"Failed to generate proof: {result.stderr}")
@@ -236,8 +267,10 @@ class ZKPProver:
                     "credential_id": credential["id"],
                     "proof": proof
                 }
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(f"Failed to generate proof: {e.stderr}")
+            except asyncio.TimeoutError:
+                raise RuntimeError(f"Proof generation timed out after {self._timeout} seconds")
+            except Exception as e:
+                raise RuntimeError(f"Error generating proof: {str(e)}")
             
         except Exception as e:
             print(f"Error generating proof: {str(e)}")
