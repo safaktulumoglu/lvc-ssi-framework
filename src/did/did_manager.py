@@ -10,6 +10,7 @@ import os
 import asyncio
 import concurrent.futures
 import time
+import aiofiles
 
 class DIDManager:
     def __init__(self):
@@ -20,14 +21,15 @@ class DIDManager:
         self._cache_lock = asyncio.Lock()
         self._storage_lock = asyncio.Lock()
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        self._load_documents()
+        asyncio.create_task(self._load_documents())
         
-    def _load_documents(self):
+    async def _load_documents(self):
         """Load DID documents from storage file."""
         try:
             if os.path.exists(self.storage_file):
-                with open(self.storage_file, 'r') as f:
-                    self.did_documents = json.load(f)
+                async with aiofiles.open(self.storage_file, 'r') as f:
+                    content = await f.read()
+                    self.did_documents = json.loads(content)
                     # Initialize cache with loaded documents
                     current_time = time.time()
                     self.did_cache = {
@@ -44,8 +46,8 @@ class DIDManager:
         try:
             os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
             async with self._storage_lock:
-                with open(self.storage_file, 'w') as f:
-                    json.dump(self.did_documents, f, indent=2)
+                async with aiofiles.open(self.storage_file, 'w') as f:
+                    await f.write(json.dumps(self.did_documents, indent=2))
         except Exception as e:
             print(f"Error saving DID documents: {str(e)}")
             raise
@@ -159,7 +161,7 @@ class DIDManager:
             
         # If not found, try to load from storage
         try:
-            self._load_documents()
+            await self._load_documents()
             async with self._storage_lock:
                 doc = self.did_documents.get(did)
                 if doc:
