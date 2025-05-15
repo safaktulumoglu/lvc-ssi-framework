@@ -1,6 +1,6 @@
 import time
 from typing import Dict, Any
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 import json
 import os
 from datetime import datetime
@@ -11,8 +11,8 @@ class PerformanceMonitor:
         self.start_time = time.time()
         self.log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'performance_logs.json')
         
-    @contextmanager
-    def measure(self, operation: str):
+    @asynccontextmanager
+    async def measure(self, operation: str):
         """Measure the execution time of an operation."""
         start = time.time()
         try:
