@@ -211,27 +211,22 @@ class ZKPProver:
         
         print(f"Raw inputs: {json.dumps(inputs, indent=2)}")  # Debug logging
         
-        # Extract credential subject data
-        credential_subject = inputs.get('credentialSubject', {})
-        if not credential_subject:
-            raise ValueError("Missing credentialSubject in inputs")
-        
         # Format inputs according to circuit requirements
         # Convert credential_id and issuer to field elements (simple hash)
-        credential_id = int(hashlib.sha256(inputs['id'].encode()).hexdigest()[:16], 16)
+        credential_id = int(hashlib.sha256(inputs['credential_id'].encode()).hexdigest()[:16], 16)
         issuer = int(hashlib.sha256(inputs['issuer'].encode()).hexdigest()[:16], 16)
         
         # Convert expiration date to timestamp
-        expiration_date = int(datetime.fromisoformat(inputs['expirationDate'].replace('Z', '+00:00')).timestamp())
+        expiration_date = int(datetime.fromisoformat(inputs['expiration_date'].replace('Z', '+00:00')).timestamp())
         
         # Convert credential type to field element
         credential_type = 123456789  # Hash of "simulation_access" as defined in circuit
         
         # Convert role to field element (1 = operator)
-        role = 1 if credential_subject.get('role') == 'simulation_operator' else 0
+        role = 1 if inputs['role'] == 'simulation_operator' else 0
         
         # Convert clearance level to field element (3 = high)
-        clearance_level = 3 if credential_subject.get('clearance') == 'top_secret' else 0
+        clearance_level = 3 if inputs['clearance_level'] == 'top_secret' else 0
         
         # Create witness inputs in the correct order
         witness_inputs = [
