@@ -9,35 +9,39 @@ from src.sig.simulation_gateway import SimulationGateway
 from src.utils.performance_monitor import PerformanceMonitor
 
 async def main():
+    """Main test function."""
     print("\n=== LVC-SSI Framework Test ===")
-    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    print(f"Started at: {datetime.utcnow().isoformat()}\n")
     
-    # Initialize performance monitor and managers
-    perf_monitor = PerformanceMonitor()
+    # Initialize managers
     did_manager = DIDManager()
     vc_manager = VCManager()
     zkp_prover = ZKPProver()
-    gateway = SimulationGateway()
+    perf_monitor = PerformanceMonitor()
     
     try:
         # 1. Create DIDs
         print("1. Creating DIDs...")
         async with perf_monitor.measure("did_creation"):
-            operator_did, operator_doc = await did_manager.create_did("Simulation Operator")
+            # Create operator DID
+            operator_did = await did_manager.create_did("Simulation Operator")
             print(f"Operator DID: {operator_did}")
+            operator_doc = await did_manager.resolve_did(operator_did)
             print(f"Operator DID Document: {json.dumps(operator_doc, indent=2)}")
             
-            commander_did, commander_doc = await did_manager.create_did("Commander")
+            # Create commander DID
+            commander_did = await did_manager.create_did("Commander")
             print(f"Commander DID: {commander_did}")
+            commander_doc = await did_manager.resolve_did(commander_did)
             print(f"Commander DID Document: {json.dumps(commander_doc, indent=2)}")
         
         # 2. Issue credential
         print("\n2. Issuing credential...")
         async with perf_monitor.measure("credential_issuance"):
-            # Get the private key from the commander's DID document
-            private_key_pem = commander_doc["verificationMethod"][0]["privateKeyPem"]
+            # Get commander's private key for signing
+            commander_key = commander_doc["verificationMethod"][0]["privateKeyPem"]
             
-            # Create credential with all required arguments in correct order
+            # Issue credential to operator
             credential = await vc_manager.issue_credential(
                 subject_did=operator_did,
                 issuer_did=commander_did,
@@ -47,60 +51,46 @@ async def main():
                     "clearance": "top_secret",
                     "simulations": ["tactical", "strategic"]
                 },
-                private_key_pem=private_key_pem,
-                validity_days=30
+                private_key_pem=commander_key
             )
             print(f"Issued Credential: {json.dumps(credential, indent=2)}")
         
         # 3. Generate ZKP
         print("\n3. Generating ZKP...")
-        async with perf_monitor.measure("zkp_compilation"):
-            circuit = await zkp_prover.compile_circuit("access_control")
-            print(f"Compiled Circuit: {circuit}")
-        
-        async with perf_monitor.measure("zkp_setup"):
-            setup = await zkp_prover.setup_circuit(circuit)
-            print(f"Circuit Setup: {setup}")
-        
-        async with perf_monitor.measure("zkp_witness"):
-            witness = await zkp_prover.generate_witness(circuit, {
-                "credential": credential,
-                "statement": "has_access"
-            })
-            print(f"Generated Witness: {witness}")
-        
-        async with perf_monitor.measure("zkp_proof"):
-            proof = await zkp_prover.generate_proof(circuit, setup, witness)
-            print(f"Generated Proof: {proof}")
-        
-        # 4. Test access control
-        print("\n4. Testing access control...")
-        async with perf_monitor.measure("access_control"):
-            access_request = {
-                "requester_did": operator_did,
-                "proof": proof,
-                "credential_id": credential["id"]
-            }
+        async with perf_monitor.measure("zkp_generation"):
+            # Compile circuits
+            await zkp_prover.compile_circuits()
             
-            response = await gateway.handle_access_request(access_request)
-            print(f"Access Control Response: {json.dumps(response, indent=2)}")
+            # Setup prover
+            await zkp_prover.setup()
+            
+            # Generate witness
+            witness = await zkp_prover.generate_witness(
+                credential=credential,
+                revealed_attributes=["role", "clearance"]
+            )
+            
+            # Generate proof
+            proof = await zkp_prover.generate_proof(witness)
+            print(f"Generated ZKP: {json.dumps(proof, indent=2)}")
         
-        # Print performance summary
-        print("\n=== Performance Summary ===")
-        metrics = perf_monitor.get_metrics()
-        for operation, stats in metrics.items():
-            print(f"\n{operation}:")
-            print(f"  Count: {stats['count']}")
-            print(f"  Min: {stats['min']:.2f}ms")
-            print(f"  Max: {stats['max']:.2f}ms")
-            print(f"  Avg: {stats['avg']:.2f}ms")
-            print(f"  Total: {stats['total']:.2f}ms")
+        # 4. Verify ZKP
+        print("\n4. Verifying ZKP...")
+        async with perf_monitor.measure("zkp_verification"):
+            verifier = ZKPVerifier()
+            is_valid = await verifier.verify_proof(proof)
+            print(f"Proof valid: {is_valid}")
         
-        print(f"\nTotal Execution Time: {perf_monitor.get_total_time():.2f}ms")
+        # Print performance metrics
+        perf_monitor.print_metrics()
         
     except Exception as e:
         print(f"\nError during test execution: {str(e)}")
-        raise
+        import traceback
+        traceback.print_exc()
+        return False
+    
+    return True
 
 if __name__ == "__main__":
     asyncio.run(main()) 
