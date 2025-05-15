@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from src.did.did_manager import DIDManager
 from src.vc.vc_manager import VCManager
 from src.zkp.zkp_prover import ZKPProver
@@ -11,7 +11,7 @@ from src.utils.performance_monitor import PerformanceMonitor
 async def main():
     """Main test function."""
     print("\n=== LVC-SSI Framework Test ===")
-    print(f"Started at: {datetime.now(datetime.UTC).isoformat()}\n")
+    print(f"Started at: {datetime.now(timezone.utc).isoformat()}\n")
     
     # Initialize managers
     did_manager = DIDManager()
