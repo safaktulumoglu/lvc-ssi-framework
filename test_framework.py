@@ -9,6 +9,7 @@ import platform
 import subprocess
 import asyncio
 import time
+from datetime import datetime
 
 def setup_zokrates():
     """Setup ZoKrates based on the platform."""
@@ -79,138 +80,78 @@ def compile_circuit():
         return False
 
 async def main():
-    # Initialize components
+    # Initialize performance monitor and managers
+    perf_monitor = PerformanceMonitor()
     did_manager = DIDManager()
     vc_manager = VCManager()
     zkp_prover = ZKPProver()
-    gateway = SimulationGateway(zkp_prover=zkp_prover)
-    perf_monitor = PerformanceMonitor()
-
-    print("\n=== Testing LVC-SSI Framework ===\n")
-    total_start_time = time.time()
-
-    # 1. Create a DID for a simulation operator
-    print("1. Creating DID for simulation operator...")
-    perf_monitor.start_operation("did_creation")
-    operator_did, operator_doc = did_manager.create_did("simulation_operator")
-    perf_monitor.end_operation("did_creation")
-    print(f"Created DID: {operator_did}")
-    print(f"DID Document: {json.dumps(operator_doc, indent=2)}\n")
-
-    # 2. Create a DID for the issuer (e.g., a commander)
-    print("2. Creating DID for commander (issuer)...")
-    perf_monitor.start_operation("did_creation")
-    commander_did, commander_doc = did_manager.create_did("commander")
-    perf_monitor.end_operation("did_creation")
-    print(f"Created DID: {commander_did}\n")
-
-    # 3. Issue a credential to the operator
-    print("3. Issuing credential to operator...")
-    perf_monitor.start_operation("credential_issuance")
-    credential = vc_manager.issue_credential(
-        subject_did=operator_did,
-        issuer_did=commander_did,
-        credential_type="simulation_access",
-        attributes={
-            "role": "operator",
-            "clearance_level": "high",
-            "allowed_simulations": ["tactical", "strategic"]
-        },
-        private_key_pem=commander_doc["verificationMethod"][0]["privateKeyPem"],
-        validity_days=30
-    )
-    perf_monitor.end_operation("credential_issuance")
-    print(f"Issued Credential: {json.dumps(credential, indent=2)}\n")
-
-    # 4. Generate a ZKP for access control
-    print("4. Generating ZKP for access control...")
-    try:
-        if setup_zokrates():
-            if compile_circuit():
-                private_inputs = {
-                    "role": "operator",
-                    "clearance_level": "high"
-                }
-                
-                # Monitor ZKP operations
-                perf_monitor.start_operation("zkp_compilation")
-                # Compile circuit
-                perf_monitor.end_operation("zkp_compilation")
-                
-                perf_monitor.start_operation("zkp_setup")
-                # Setup circuit
-                perf_monitor.end_operation("zkp_setup")
-                
-                perf_monitor.start_operation("zkp_witness")
-                # Compute witness
-                perf_monitor.end_operation("zkp_witness")
-                
-                perf_monitor.start_operation("zkp_proof")
-                proof = zkp_prover.generate_proof(
-                    credential=credential,
-                    proof_type="access_control",
-                    private_inputs=private_inputs
-                )
-                perf_monitor.end_operation("zkp_proof")
-                
-                print(f"Generated Proof: {json.dumps(proof, indent=2)}\n")
-            else:
-                print("Skipping ZKP generation due to circuit compilation failure")
-                proof = None
-        else:
-            print("Skipping ZKP generation due to ZoKrates not being installed")
-            proof = None
-    except Exception as e:
-        print(f"Error during ZKP generation: {str(e)}")
-        print("Continuing with access control test without ZKP...")
-        proof = None
-
-    # 5. Test access control
-    print("5. Testing access control...")
-    gateway.add_access_policy(
-        resource_id="tactical_simulation",
-        policy={
-            "public_inputs": {
-                "required_role": "operator",
-                "required_clearance": "high"
-            }
-        }
-    )
-
-    perf_monitor.start_operation("access_control")
-    if proof is not None:
-        print(f"Using proof ID: {proof['proof_id']}")
-        print(f"Proof cache contents: {list(zkp_prover.proof_cache.keys())}")
-        access_response = await gateway.handle_access_request(AccessRequest(
-            proof_id=proof["proof_id"],
-            resource_id="tactical_simulation",
-            action="execute"
-        ))
-    else:
-        print("Falling back to credential-based access control")
-        access_response = await gateway.handle_access_request(AccessRequest(
-            credential=credential,
-            resource_id="tactical_simulation",
-            action="execute"
-        ))
-    perf_monitor.end_operation("access_control")
-    print(f"Access Response: {json.dumps(access_response.model_dump(), indent=2)}\n")
-
-    # 6. Access Logs
-    print("6. Access Logs:")
-    logs = await gateway.get_access_logs()
-    print(json.dumps(logs, indent=2))
-
-    # Calculate total execution time
-    total_execution_time = (time.time() - total_start_time) * 1000  # Convert to milliseconds
-
-    # Print performance metrics
-    print("\n=== Performance Summary ===")
-    print(f"Total Execution Time: {total_execution_time:.2f}ms")
-    perf_monitor.print_metrics()
+    gateway = SimulationGateway()
     
-    # Save metrics
-    perf_monitor.save_metrics()
+    print("\n=== LVC-SSI Framework Test ===")
+    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Create DIDs for simulation operator and commander
+    print("\n1. Creating DIDs...")
+    with perf_monitor.measure("did_creation"):
+        operator_did = await did_manager.create_did("Simulation Operator")
+        commander_did = await did_manager.create_did("Commander")
+    
+    print(f"Operator DID: {operator_did}")
+    print(f"Commander DID: {commander_did}")
+    
+    # Issue credential to operator
+    print("\n2. Issuing credential...")
+    with perf_monitor.measure("credential_issuance"):
+        credential = await vc_manager.issue_credential(
+            subject_did=operator_did,
+            issuer_did=commander_did,
+            credential_type="SimulationAccess",
+            attributes={
+                "role": "operator",
+                "clearance": "top_secret",
+                "simulations": ["tactical", "strategic"]
+            }
+        )
+    
+    print(f"Issued credential: {json.dumps(credential, indent=2)}")
+    
+    # Generate ZKP for access control
+    print("\n3. Generating ZKP...")
+    with perf_monitor.measure("zkp_generation"):
+        proof = await zkp_prover.generate_proof(
+            credential=credential,
+            statement="has_clearance('top_secret')"
+        )
+    
+    print(f"Generated proof: {json.dumps(proof, indent=2)}")
+    
+    # Test access control
+    print("\n4. Testing access control...")
+    with perf_monitor.measure("access_control"):
+        access_request = {
+            "proof_id": proof["id"],
+            "credential_id": credential["id"],
+            "resource_id": "simulation_engine",
+            "action": "start_simulation"
+        }
+        
+        response = await gateway.handle_access_request(access_request)
+    
+    print(f"Access control response: {json.dumps(response, indent=2)}")
+    
+    # Print performance summary
+    print("\n=== Performance Summary ===")
+    metrics = perf_monitor.get_metrics()
+    for operation, stats in metrics.items():
+        print(f"\n{operation}:")
+        print(f"  Count: {stats['count']}")
+        print(f"  Min: {stats['min']:.2f}ms")
+        print(f"  Max: {stats['max']:.2f}ms")
+        print(f"  Avg: {stats['avg']:.2f}ms")
+        print(f"  Total: {stats['total']:.2f}ms")
+    
+    print(f"\nTotal execution time: {perf_monitor.get_total_time():.2f}ms")
+    print(f"\nCompleted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
     asyncio.run(main()) 
