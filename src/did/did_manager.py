@@ -7,21 +7,35 @@ import base58
 import didkit
 import base64
 import os
+import asyncio
+import concurrent.futures
+import threading
+import time
 
 class DIDManager:
     def __init__(self):
         self.storage_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'did_documents.json')
         self.did_documents: Dict[str, dict] = {}
-        self.did_cache: Dict[str, dict] = {}  # In-memory cache for DID documents
+        self.did_cache: Dict[str, tuple[dict, float]] = {}  # Cache with timestamp
+        self.cache_ttl = 300  # Cache TTL in seconds
+        self._cache_lock = threading.Lock()
+        self._storage_lock = threading.Lock()
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         self._load_documents()
         
     def _load_documents(self):
         """Load DID documents from storage file."""
         try:
             if os.path.exists(self.storage_file):
-                with open(self.storage_file, 'r') as f:
-                    self.did_documents = json.load(f)
-                    self.did_cache = self.did_documents.copy()  # Initialize cache
+                with self._storage_lock:
+                    with open(self.storage_file, 'r') as f:
+                        self.did_documents = json.load(f)
+                        # Initialize cache with loaded documents
+                        current_time = time.time()
+                        self.did_cache = {
+                            did: (doc, current_time)
+                            for did, doc in self.did_documents.items()
+                        }
         except Exception as e:
             print(f"Error loading DID documents: {str(e)}")
             self.did_documents = {}
@@ -31,13 +45,14 @@ class DIDManager:
         """Save DID documents to storage file."""
         try:
             os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
-            with open(self.storage_file, 'w') as f:
-                json.dump(self.did_documents, f, indent=2)
+            with self._storage_lock:
+                with open(self.storage_file, 'w') as f:
+                    json.dump(self.did_documents, f, indent=2)
         except Exception as e:
             print(f"Error saving DID documents: {str(e)}")
             raise
             
-    def create_did(self, participant_type: str) -> tuple[str, dict]:
+    async def create_did(self, participant_type: str) -> tuple[str, dict]:
         """
         Create a new DID and its associated document.
         
@@ -48,11 +63,15 @@ class DIDManager:
             tuple: (DID string, DID document)
         """
         try:
-            # Generate RSA key pair with optimized parameters
-            private_key = rsa.generate_private_key(
-                public_exponent=65537,
-                key_size=2048,
-                backend=default_backend()
+            # Generate RSA key pair with optimized parameters in parallel
+            loop = asyncio.get_event_loop()
+            private_key = await loop.run_in_executor(
+                self._executor,
+                lambda: rsa.generate_private_key(
+                    public_exponent=65537,
+                    key_size=2048,
+                    backend=default_backend()
+                )
             )
             
             # Get public key in PEM format
@@ -78,7 +97,10 @@ class DIDManager:
             }
             
             # Create DID using didkit
-            did = didkit.key_to_did("key", json.dumps(jwk))
+            did = await loop.run_in_executor(
+                self._executor,
+                lambda: didkit.key_to_did("key", json.dumps(jwk))
+            )
             
             # Create DID document
             did_document = {
@@ -97,9 +119,12 @@ class DIDManager:
             }
             
             # Store DID document in both cache and storage
-            self.did_documents[did] = did_document
-            self.did_cache[did] = did_document
-            self._save_documents()
+            with self._cache_lock:
+                self.did_cache[did] = (did_document, time.time())
+            
+            with self._storage_lock:
+                self.did_documents[did] = did_document
+                self._save_documents()
             
             return did, did_document
             
@@ -107,7 +132,7 @@ class DIDManager:
             print(f"Error creating DID: {str(e)}")
             raise
     
-    def resolve_did(self, did: str) -> Optional[dict]:
+    async def resolve_did(self, did: str) -> Optional[dict]:
         """
         Resolve a DID to its document.
         
@@ -118,28 +143,36 @@ class DIDManager:
             dict: The DID document if found, None otherwise
         """
         # Try cache first
-        doc = self.did_cache.get(did)
-        if doc:
-            return doc
+        with self._cache_lock:
+            if did in self.did_cache:
+                doc, timestamp = self.did_cache[did]
+                if time.time() - timestamp < self.cache_ttl:
+                    return doc
+                else:
+                    del self.did_cache[did]  # Remove expired cache entry
             
         # Try memory
-        doc = self.did_documents.get(did)
-        if doc:
-            self.did_cache[did] = doc  # Update cache
-            return doc
+        with self._storage_lock:
+            doc = self.did_documents.get(did)
+            if doc:
+                with self._cache_lock:
+                    self.did_cache[did] = (doc, time.time())  # Update cache
+                return doc
             
         # If not found, try to load from storage
         try:
             self._load_documents()
-            doc = self.did_documents.get(did)
-            if doc:
-                self.did_cache[did] = doc  # Update cache
-            return doc
+            with self._storage_lock:
+                doc = self.did_documents.get(did)
+                if doc:
+                    with self._cache_lock:
+                        self.did_cache[did] = (doc, time.time())  # Update cache
+                return doc
         except Exception as e:
             print(f"Error resolving DID: {str(e)}")
             return None
     
-    def revoke_did(self, did: str) -> bool:
+    async def revoke_did(self, did: str) -> bool:
         """
         Revoke a DID.
         
@@ -150,10 +183,15 @@ class DIDManager:
             bool: True if successful, False otherwise
         """
         try:
-            if did in self.did_documents:
-                del self.did_documents[did]
-                self._save_documents()
-                return True
+            with self._storage_lock:
+                if did in self.did_documents:
+                    del self.did_documents[did]
+                    self._save_documents()
+                    
+                    with self._cache_lock:
+                        if did in self.did_cache:
+                            del self.did_cache[did]
+                    return True
             return False
         except Exception as e:
             print(f"Error revoking DID: {str(e)}")

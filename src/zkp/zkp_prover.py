@@ -7,14 +7,20 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import base64
 from datetime import datetime
+import asyncio
+import concurrent.futures
+import threading
 
 class ZKPProver:
     def __init__(self):
         self.proof_cache: Dict[str, Any] = {}
         self.working_dir = os.path.join(os.path.dirname(__file__), '..', 'circuits')
         self.abs_working_dir = os.path.abspath(self.working_dir)
-        self.compiled_circuits: Dict[str, bool] = {}  # Track compiled circuits
-        self.setup_done: Dict[str, bool] = {}  # Track setup completion
+        self.compiled_circuits: Dict[str, bool] = {}
+        self.setup_done: Dict[str, bool] = {}
+        self._circuit_lock = threading.Lock()  # Lock for circuit operations
+        self._proof_cache_lock = threading.Lock()  # Lock for proof cache
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)  # Thread pool for parallel operations
         
     def _run_zokrates_command(self, command: list) -> subprocess.CompletedProcess:
         """Run a ZoKrates command using Docker."""
@@ -25,23 +31,30 @@ class ZKPProver:
         ] + command
         return subprocess.run(docker_cmd, check=True, capture_output=True, text=True)
         
-    def _ensure_circuit_ready(self, proof_type: str):
+    async def _ensure_circuit_ready(self, proof_type: str):
         """Ensure circuit is compiled and setup is done."""
-        if not self.compiled_circuits.get(proof_type):
-            print(f"Compiling circuit for {proof_type}...")
-            circuit_path = os.path.join(self.working_dir, f"{proof_type}.zok")
-            self._run_zokrates_command(['compile', '-i', os.path.basename(circuit_path)])
-            self.compiled_circuits[proof_type] = True
-            
-        if not self.setup_done.get(proof_type):
-            print(f"Setting up circuit for {proof_type}...")
-            self._run_zokrates_command(['setup'])
-            self.setup_done[proof_type] = True
+        with self._circuit_lock:
+            if not self.compiled_circuits.get(proof_type):
+                print(f"Compiling circuit for {proof_type}...")
+                circuit_path = os.path.join(self.working_dir, f"{proof_type}.zok")
+                await asyncio.get_event_loop().run_in_executor(
+                    self._executor,
+                    lambda: self._run_zokrates_command(['compile', '-i', os.path.basename(circuit_path)])
+                )
+                self.compiled_circuits[proof_type] = True
+                
+            if not self.setup_done.get(proof_type):
+                print(f"Setting up circuit for {proof_type}...")
+                await asyncio.get_event_loop().run_in_executor(
+                    self._executor,
+                    lambda: self._run_zokrates_command(['setup'])
+                )
+                self.setup_done[proof_type] = True
 
-    def generate_proof(self, 
-                      credential: dict,
-                      proof_type: str,
-                      private_inputs: dict) -> dict:
+    async def generate_proof(self, 
+                           credential: dict,
+                           proof_type: str,
+                           private_inputs: dict) -> dict:
         """
         Generate a Zero-Knowledge Proof for a credential.
         
@@ -54,8 +67,19 @@ class ZKPProver:
             dict: The generated proof
         """
         try:
+            # Check cache first
+            proof_id = self._generate_proof_id(credential["id"], proof_type)
+            with self._proof_cache_lock:
+                if proof_id in self.proof_cache:
+                    return {
+                        "proof_id": proof_id,
+                        "proof_type": proof_type,
+                        "credential_id": credential["id"],
+                        "proof": self.proof_cache[proof_id]
+                    }
+
             # Ensure circuit is ready
-            self._ensure_circuit_ready(proof_type)
+            await self._ensure_circuit_ready(proof_type)
             
             # Convert credential to proof inputs
             public_inputs = self._prepare_public_inputs(credential)
@@ -101,25 +125,35 @@ class ZKPProver:
             
             print("Witness values:", witness_values)
             
+            # Run witness computation and proof generation in parallel
+            loop = asyncio.get_event_loop()
+            
             # Compute witness
             print("Computing witness...")
-            witness_result = self._run_zokrates_command(['compute-witness', '-a'] + witness_values)
+            witness_result = await loop.run_in_executor(
+                self._executor,
+                lambda: self._run_zokrates_command(['compute-witness', '-a'] + witness_values)
+            )
             if witness_result.returncode != 0:
                 print(f"Error computing witness: {witness_result.stderr}")
                 return None
-            print("Witness computation successful")
             
             # Generate proof
             print("Generating proof...")
-            proof_result = self._run_zokrates_command(['generate-proof'])
+            proof_result = await loop.run_in_executor(
+                self._executor,
+                lambda: self._run_zokrates_command(['generate-proof'])
+            )
             if proof_result.returncode != 0:
                 print(f"Error generating proof: {proof_result.stderr}")
                 return None
-            print("Proof generation successful")
             
-            # Export verifier
+            # Export verifier in parallel
             print("Exporting verifier...")
-            self._run_zokrates_command(['export-verifier'])
+            await loop.run_in_executor(
+                self._executor,
+                lambda: self._run_zokrates_command(['export-verifier'])
+            )
             
             # Read the proof
             if not os.path.exists(proof_path):
@@ -133,8 +167,8 @@ class ZKPProver:
                 proof = json.load(f)
             
             # Cache the proof
-            proof_id = self._generate_proof_id(credential["id"], proof_type)
-            self.proof_cache[proof_id] = proof
+            with self._proof_cache_lock:
+                self.proof_cache[proof_id] = proof
             
             return {
                 "proof_id": proof_id,
@@ -142,20 +176,13 @@ class ZKPProver:
                 "credential_id": credential["id"],
                 "proof": proof
             }
-        except subprocess.CalledProcessError as e:
-            print(f"Error generating proof: {str(e)}")
-            if e.stdout:
-                print(f"Command stdout: {e.stdout}")
-            if e.stderr:
-                print(f"Command stderr: {e.stderr}")
-            return None
         except Exception as e:
-            print(f"Unexpected error: {str(e)}")
+            print(f"Error generating proof: {str(e)}")
             return None
     
-    def verify_proof(self, 
-                    proof: dict,
-                    public_inputs: dict) -> bool:
+    async def verify_proof(self, 
+                          proof: dict,
+                          public_inputs: dict) -> bool:
         """
         Verify a Zero-Knowledge Proof.
         
@@ -172,8 +199,12 @@ class ZKPProver:
             with open(proof_path, 'w') as f:
                 json.dump(proof["proof"], f)
             
-            # Verify proof
-            result = self._run_zokrates_command(['verify'])
+            # Verify proof using thread pool
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                self._executor,
+                lambda: self._run_zokrates_command(['verify'])
+            )
             return result.returncode == 0
         except Exception as e:
             print(f"Error verifying proof: {str(e)}")

@@ -9,21 +9,27 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 import time
+import asyncio
+import concurrent.futures
+import threading
 
 class VCManager:
     def __init__(self):
         self.issued_vcs: Dict[str, dict] = {}
         self.revoked_vcs: set = set()
-        self.verification_cache: Dict[str, tuple[bool, float]] = {}  # Cache for verification results with timestamp
+        self.verification_cache: Dict[str, tuple[bool, float]] = {}  # Cache with timestamp
         self.cache_ttl = 300  # Cache TTL in seconds
+        self._cache_lock = threading.Lock()
+        self._storage_lock = threading.Lock()
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         
-    def issue_credential(self, 
-                        subject_did: str,
-                        issuer_did: str,
-                        credential_type: str,
-                        attributes: dict,
-                        private_key_pem: str,
-                        validity_days: int = 30) -> dict:
+    async def issue_credential(self, 
+                             subject_did: str,
+                             issuer_did: str,
+                             credential_type: str,
+                             attributes: dict,
+                             private_key_pem: str,
+                             validity_days: int = 30) -> dict:
         """
         Issue a Verifiable Credential.
         """
@@ -51,11 +57,17 @@ class VCManager:
                 }
             }
             
-            # Sign the credential
-            private_key = serialization.load_pem_private_key(
-                private_key_pem.encode(),
-                password=None,
-                backend=default_backend()
+            # Sign the credential in parallel
+            loop = asyncio.get_event_loop()
+            
+            # Load private key
+            private_key = await loop.run_in_executor(
+                self._executor,
+                lambda: serialization.load_pem_private_key(
+                    private_key_pem.encode(),
+                    password=None,
+                    backend=default_backend()
+                )
             )
             
             # Create JWT
@@ -73,19 +85,25 @@ class VCManager:
                 "vc": credential
             }
             
-            # Encode and sign
+            # Encode and sign in parallel
             encoded_header = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip('=')
             encoded_payload = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip('=')
             
             message = f"{encoded_header}.{encoded_payload}"
-            signature = private_key.sign(
-                message.encode(),
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                algorithm=hashes.SHA256()
+            
+            # Sign the message
+            signature = await loop.run_in_executor(
+                self._executor,
+                lambda: private_key.sign(
+                    message.encode(),
+                    padding.PSS(
+                        mgf=padding.MGF1(hashes.SHA256()),
+                        salt_length=padding.PSS.MAX_LENGTH
+                    ),
+                    algorithm=hashes.SHA256()
+                )
             )
+            
             encoded_signature = base64.urlsafe_b64encode(signature).decode().rstrip('=')
             
             # Add proof
@@ -98,7 +116,8 @@ class VCManager:
             }
             
             # Store credential
-            self.issued_vcs[credential_id] = credential
+            with self._storage_lock:
+                self.issued_vcs[credential_id] = credential
             
             return credential
             
@@ -106,68 +125,79 @@ class VCManager:
             print(f"Error issuing credential: {str(e)}")
             raise
             
-    def verify_credential(self, credential: dict, issuer_public_key_pem: str) -> bool:
+    async def verify_credential(self, credential: dict, issuer_public_key_pem: str) -> bool:
         """
         Verify a Verifiable Credential.
         """
         # Check cache first
         cache_key = f"{credential['id']}:{issuer_public_key_pem}"
-        if cache_key in self.verification_cache:
-            is_valid, timestamp = self.verification_cache[cache_key]
-            if time.time() - timestamp < self.cache_ttl:
-                return is_valid
+        with self._cache_lock:
+            if cache_key in self.verification_cache:
+                is_valid, timestamp = self.verification_cache[cache_key]
+                if time.time() - timestamp < self.cache_ttl:
+                    return is_valid
+                else:
+                    del self.verification_cache[cache_key]  # Remove expired cache entry
         
         # Check if credential is revoked
         if credential["id"] in self.revoked_vcs:
-            self.verification_cache[cache_key] = (False, time.time())
+            with self._cache_lock:
+                self.verification_cache[cache_key] = (False, time.time())
             return False
         
         # Check expiration
         if datetime.fromisoformat(credential["expirationDate"]) < datetime.utcnow():
-            self.verification_cache[cache_key] = (False, time.time())
+            with self._cache_lock:
+                self.verification_cache[cache_key] = (False, time.time())
             return False
         
         try:
+            # Load public key and verify JWT in parallel
+            loop = asyncio.get_event_loop()
+            
             # Load public key
-            public_key = serialization.load_pem_public_key(
-                issuer_public_key_pem.encode(),
-                backend=default_backend()
+            public_key = await loop.run_in_executor(
+                self._executor,
+                lambda: serialization.load_pem_public_key(
+                    issuer_public_key_pem.encode(),
+                    backend=default_backend()
+                )
             )
             
             # Verify JWT signature
             token = credential["proof"]["jwt"]
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=['RS256'],
-                options={
-                    'verify_exp': False,  # We already checked expiration
-                    'verify_iat': True,
-                    'verify_iss': True,
-                    'verify_aud': False
-                }
+            payload = await loop.run_in_executor(
+                self._executor,
+                lambda: jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=['RS256'],
+                    options={
+                        'verify_exp': False,  # We already checked expiration
+                        'verify_iat': True,
+                        'verify_iss': True,
+                        'verify_aud': False
+                    }
+                )
             )
             
             # Verify payload matches credential
             is_valid = payload["id"] == credential["id"]
-            self.verification_cache[cache_key] = (is_valid, time.time())
+            with self._cache_lock:
+                self.verification_cache[cache_key] = (is_valid, time.time())
             return is_valid
             
         except Exception:
-            self.verification_cache[cache_key] = (False, time.time())
+            with self._cache_lock:
+                self.verification_cache[cache_key] = (False, time.time())
             return False
     
-    def revoke_credential(self, credential_id: str) -> bool:
+    async def revoke_credential(self, credential_id: str) -> bool:
         """
         Revoke a Verifiable Credential.
-        
-        Args:
-            credential_id: ID of the credential to revoke
-            
-        Returns:
-            bool: True if successful, False otherwise
         """
-        if credential_id in self.issued_vcs:
-            self.revoked_vcs.add(credential_id)
-            return True
+        with self._storage_lock:
+            if credential_id in self.issued_vcs:
+                self.revoked_vcs.add(credential_id)
+                return True
         return False 

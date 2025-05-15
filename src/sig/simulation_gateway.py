@@ -3,6 +3,10 @@ from pydantic import BaseModel
 from typing import Optional, Dict
 import uvicorn
 from datetime import datetime
+import asyncio
+import concurrent.futures
+import threading
+import time
 
 from src.did.did_manager import DIDManager
 from src.vc.vc_manager import VCManager
@@ -27,8 +31,10 @@ class SimulationGateway:
         self.zkp_prover = zkp_prover if zkp_prover is not None else ZKPProver()
         self.access_policies: Dict[str, dict] = {}
         self.access_logs: list = []
-        self.access_cache: Dict[str, tuple[bool, str]] = {}  # Cache for access decisions
+        self.access_cache: Dict[str, tuple[bool, str, float]] = {}  # Cache with timestamp
         self.cache_ttl = 300  # Cache TTL in seconds
+        self._cache_lock = threading.Lock()
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         
         # Setup routes
         self.app.post("/access/request", response_model=AccessResponse)(self.handle_access_request)
@@ -43,14 +49,19 @@ class SimulationGateway:
             
     def _check_cache(self, cache_key: str) -> Optional[tuple[bool, str]]:
         """Check if the access decision is cached and valid."""
-        if cache_key in self.access_cache:
-            is_valid, reason = self.access_cache[cache_key]
-            return is_valid, reason
+        with self._cache_lock:
+            if cache_key in self.access_cache:
+                is_valid, reason, timestamp = self.access_cache[cache_key]
+                if time.time() - timestamp < self.cache_ttl:
+                    return is_valid, reason
+                else:
+                    del self.access_cache[cache_key]  # Remove expired cache entry
         return None
         
     def _update_cache(self, cache_key: str, is_valid: bool, reason: str):
         """Update the access cache."""
-        self.access_cache[cache_key] = (is_valid, reason)
+        with self._cache_lock:
+            self.access_cache[cache_key] = (is_valid, reason, time.time())
         
     async def handle_access_request(self, request: AccessRequest) -> AccessResponse:
         """
@@ -88,7 +99,6 @@ class SimulationGateway:
         if request.proof_id:
             # ZKP-based access control
             print(f"Verifying proof with ID: {request.proof_id}")
-            print(f"Available proof IDs: {list(self.zkp_prover.proof_cache.keys())}")
             
             proof = self.zkp_prover.proof_cache.get(request.proof_id)
             if not proof:
@@ -105,16 +115,26 @@ class SimulationGateway:
                 **policy["public_inputs"]
             }
             
-            print(f"Verifying proof with inputs: {public_inputs}")
-            is_valid = self.zkp_prover.verify_proof(proof, public_inputs)
+            # Run proof verification in thread pool
+            loop = asyncio.get_event_loop()
+            is_valid = await loop.run_in_executor(
+                self._executor,
+                lambda: self.zkp_prover.verify_proof(proof, public_inputs)
+            )
             reason = "Access granted" if is_valid else "Invalid proof"
-            print(f"Proof verification result: {is_valid}")
             
         elif request.credential:
             # Credential-based access control
             try:
+                # Get issuer's DID document and verify credential in parallel
+                loop = asyncio.get_event_loop()
+                
                 # Get issuer's DID document
-                issuer_doc = self.did_manager.resolve_did(request.credential["issuer"])
+                issuer_doc = await loop.run_in_executor(
+                    self._executor,
+                    lambda: self.did_manager.resolve_did(request.credential["issuer"])
+                )
+                
                 if not issuer_doc:
                     return AccessResponse(
                         granted=False,
@@ -126,9 +146,12 @@ class SimulationGateway:
                 issuer_public_key = issuer_doc["verificationMethod"][0]["publicKeyPem"]
                 
                 # Verify the credential
-                is_valid = self.vc_manager.verify_credential(
-                    request.credential,
-                    issuer_public_key
+                is_valid = await loop.run_in_executor(
+                    self._executor,
+                    lambda: self.vc_manager.verify_credential(
+                        request.credential,
+                        issuer_public_key
+                    )
                 )
                 
                 if is_valid:
