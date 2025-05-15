@@ -11,7 +11,7 @@ from src.utils.performance_monitor import PerformanceMonitor
 async def main():
     """Main test function."""
     print("\n=== LVC-SSI Framework Test ===")
-    print(f"Started at: {datetime.utcnow().isoformat()}\n")
+    print(f"Started at: {datetime.now(datetime.UTC).isoformat()}\n")
     
     # Initialize managers
     did_manager = DIDManager()
@@ -24,15 +24,13 @@ async def main():
         print("1. Creating DIDs...")
         async with perf_monitor.measure("did_creation"):
             # Create operator DID
-            operator_did = await did_manager.create_did("Simulation Operator")
+            operator_did, operator_doc = await did_manager.create_did("Simulation Operator")
             print(f"Operator DID: {operator_did}")
-            operator_doc = await did_manager.resolve_did(operator_did)
             print(f"Operator DID Document: {json.dumps(operator_doc, indent=2)}")
             
             # Create commander DID
-            commander_did = await did_manager.create_did("Commander")
+            commander_did, commander_doc = await did_manager.create_did("Commander")
             print(f"Commander DID: {commander_did}")
-            commander_doc = await did_manager.resolve_did(commander_did)
             print(f"Commander DID Document: {json.dumps(commander_doc, indent=2)}")
         
         # 2. Issue credential
