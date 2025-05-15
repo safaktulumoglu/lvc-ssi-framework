@@ -32,6 +32,18 @@ class ZKPProver:
         self.proof_cache = {}
         self._witness_cache = {}
         self._verifier_cache = {}
+        
+        # Ensure Docker is available
+        try:
+            subprocess.run(['docker', '--version'], check=True, capture_output=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            raise RuntimeError("Docker is required but not found. Please install Docker first.")
+        
+        # Pull ZoKrates image if not present
+        try:
+            subprocess.run(['docker', 'pull', 'zokrates/zokrates'], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to pull ZoKrates Docker image: {e.stderr.decode()}")
     
     def __del__(self):
         """Cleanup thread pool executor on deletion."""
@@ -44,8 +56,17 @@ class ZKPProver:
         with open(file_path, 'rb') as f:
             return hashlib.sha256(f.read()).hexdigest()
     
+    def _run_zokrates_command(self, command: list) -> subprocess.CompletedProcess:
+        """Run a ZoKrates command using Docker."""
+        docker_cmd = [
+            'docker', 'run', '-v', f'{self._circuit_dir}:/home/zokrates/code',
+            '-w', '/home/zokrates/code', 'zokrates/zokrates',
+            '/home/zokrates/.zokrates/bin/zokrates'
+        ] + command
+        return subprocess.run(docker_cmd, check=True, capture_output=True, text=True)
+    
     async def _compile_circuit(self, circuit_name: str) -> str:
-        """Compile a circuit using the thread pool with enhanced caching."""
+        """Compile a circuit using Docker with enhanced caching."""
         circuit_path = self._circuit_dir / f"{circuit_name}.zok"
         if not circuit_path.exists():
             raise FileNotFoundError(f"Circuit file not found: {circuit_path}")
@@ -60,21 +81,23 @@ class ZKPProver:
             if file_hash in self._circuit_cache:
                 return self._circuit_cache[file_hash]
             
-            # Compile circuit
+            # Compile circuit using Docker
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self._executor,
-                lambda: os.system(f"zokrates compile -i {circuit_path}")
-            )
-            
-            if result != 0:
-                raise RuntimeError(f"Failed to compile circuit: {circuit_name}")
-            
-            self._circuit_cache[file_hash] = str(circuit_path)
-            return str(circuit_path)
+            try:
+                result = await loop.run_in_executor(
+                    self._executor,
+                    lambda: self._run_zokrates_command(['compile', '-i', circuit_path.name])
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"Failed to compile circuit: {result.stderr}")
+                
+                self._circuit_cache[file_hash] = str(circuit_path)
+                return str(circuit_path)
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"Failed to compile circuit: {e.stderr}")
     
     async def _setup_circuit(self, circuit_name: str) -> str:
-        """Set up a circuit using the thread pool with enhanced caching."""
+        """Set up a circuit using Docker with enhanced caching."""
         circuit_path = await self._compile_circuit(circuit_name)
         
         # Check cache with file hash
@@ -87,21 +110,23 @@ class ZKPProver:
             if file_hash in self._setup_cache:
                 return self._setup_cache[file_hash]
             
-            # Setup circuit
+            # Setup circuit using Docker
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self._executor,
-                lambda: os.system(f"zokrates setup -i {circuit_path}")
-            )
-            
-            if result != 0:
-                raise RuntimeError(f"Failed to setup circuit: {circuit_name}")
-            
-            self._setup_cache[file_hash] = str(circuit_path)
-            return str(circuit_path)
+            try:
+                result = await loop.run_in_executor(
+                    self._executor,
+                    lambda: self._run_zokrates_command(['setup'])
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"Failed to setup circuit: {result.stderr}")
+                
+                self._setup_cache[file_hash] = str(circuit_path)
+                return str(circuit_path)
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"Failed to setup circuit: {e.stderr}")
     
     async def _compute_witness(self, circuit_name: str, inputs: Dict[str, Any]) -> str:
-        """Compute witness using the thread pool with caching."""
+        """Compute witness using Docker with caching."""
         circuit_path = await self._setup_circuit(circuit_name)
         witness_path = self._circuit_dir / f"{circuit_name}.wtns"
         
@@ -126,19 +151,25 @@ class ZKPProver:
         with open(input_file, 'w') as f:
             json.dump(witness_inputs, f)
         
-        # Compute witness
+        # Compute witness using Docker
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            self._executor,
-            lambda: os.system(f"zokrates compute-witness -i {circuit_path} -o {witness_path} -a {' '.join(map(str, witness_inputs))}")
-        )
-        
-        if result != 0:
-            raise RuntimeError(f"Failed to compute witness for circuit: {circuit_name}")
-        
-        # Cache the witness path
-        self._witness_cache[cache_key] = str(witness_path)
-        return str(witness_path)
+        try:
+            result = await loop.run_in_executor(
+                self._executor,
+                lambda: self._run_zokrates_command([
+                    'compute-witness',
+                    '-i', circuit_path.name,
+                    '-o', witness_path.name,
+                    '-a'
+                ] + [str(x) for x in witness_inputs])
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Failed to compute witness: {result.stderr}")
+            
+            self._witness_cache[cache_key] = str(witness_path)
+            return str(witness_path)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to compute witness: {e.stderr}")
     
     async def generate_proof(self, credential: Dict[str, Any], proof_type: str, private_inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Generate a zero-knowledge proof with optimized caching."""
@@ -168,38 +199,45 @@ class ZKPProver:
                 circuit_task, setup_task, witness_task
             )
             
-            # Generate proof
+            # Generate proof using Docker
             proof_path = self._circuit_dir / "proof.json"
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self._executor,
-                lambda: os.system(f"zokrates generate-proof -i {circuit_path} -w {witness_path} -p {proof_path}")
-            )
-            
-            if result != 0:
-                raise RuntimeError(f"Failed to generate proof for circuit: {proof_type}")
-            
-            # Read and return proof
-            with open(proof_path, 'r') as f:
-                proof = json.load(f)
-            
-            # Add metadata
-            proof["metadata"] = {
-                "credential_id": credential["id"],
-                "proof_type": proof_type,
-                "generated_at": str(datetime.now(timezone.utc))
-            }
-            
-            # Cache the proof
-            with self._proof_cache_lock:
-                self.proof_cache[proof_id] = proof
-            
-            return {
-                "proof_id": proof_id,
-                "proof_type": proof_type,
-                "credential_id": credential["id"],
-                "proof": proof
-            }
+            try:
+                result = await loop.run_in_executor(
+                    self._executor,
+                    lambda: self._run_zokrates_command([
+                        'generate-proof',
+                        '-i', circuit_path.name,
+                        '-w', witness_path.name,
+                        '-p', proof_path.name
+                    ])
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"Failed to generate proof: {result.stderr}")
+                
+                # Read and return proof
+                with open(proof_path, 'r') as f:
+                    proof = json.load(f)
+                
+                # Add metadata
+                proof["metadata"] = {
+                    "credential_id": credential["id"],
+                    "proof_type": proof_type,
+                    "generated_at": str(datetime.now(timezone.utc))
+                }
+                
+                # Cache the proof
+                with self._proof_cache_lock:
+                    self.proof_cache[proof_id] = proof
+                
+                return {
+                    "proof_id": proof_id,
+                    "proof_type": proof_type,
+                    "credential_id": credential["id"],
+                    "proof": proof
+                }
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"Failed to generate proof: {e.stderr}")
             
         except Exception as e:
             print(f"Error generating proof: {str(e)}")
@@ -226,31 +264,29 @@ class ZKPProver:
             with open(proof_path, 'w') as f:
                 json.dump(proof["proof"], f)
             
-            # Verify proof
+            # Verify proof using Docker
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self._executor,
-                lambda: os.system(f"zokrates verify -i {self._get_circuit_path(circuit_name)} -p {proof_path}")
-            )
-            
-            if result == 0:
-                # Cache successful verification
-                self._verifier_cache[verifier_key] = True
-            
-            return result == 0
+            try:
+                result = await loop.run_in_executor(
+                    self._executor,
+                    lambda: self._run_zokrates_command([
+                        'verify',
+                        '-i', self._get_circuit_path(circuit_name).name,
+                        '-p', proof_path.name
+                    ])
+                )
+                if result.returncode == 0:
+                    # Cache successful verification
+                    self._verifier_cache[verifier_key] = True
+                    return True
+                return False
+            except subprocess.CalledProcessError as e:
+                print(f"Error verifying proof: {e.stderr}")
+                return False
             
         except Exception as e:
             print(f"Error verifying proof: {str(e)}")
             return False
-    
-    def _run_zokrates_command(self, command: list) -> subprocess.CompletedProcess:
-        """Run a ZoKrates command using Docker."""
-        docker_cmd = [
-            'docker', 'run', '-v', f'{self._circuit_dir}:/home/zokrates/code',
-            '-w', '/home/zokrates/code', 'zokrates/zokrates',
-            '/home/zokrates/.zokrates/bin/zokrates'
-        ] + command
-        return subprocess.run(docker_cmd, check=True, capture_output=True, text=True)
     
     @lru_cache(maxsize=32)
     def _get_circuit_path(self, proof_type: str) -> Path:
@@ -282,10 +318,17 @@ class ZKPProver:
             await self._setup_circuit(proof_type)
             self._setup_cache[circuit_hash] = True
     
-    def _generate_proof_id(self, credential: Dict[str, Any], proof_type: str) -> str:
+    def _generate_proof_id(self, credential_id: str, proof_type: str) -> str:
         """Generate a unique proof ID."""
-        data = f"{credential['id']}:{proof_type}:{credential['issuanceDate']}"
-        return hashlib.md5(data.encode()).digest().hex()[:16]
+        # Use HKDF to generate a deterministic ID
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=16,
+            salt=None,
+            info=b'proof_id'
+        )
+        key = hkdf.derive(f"{credential_id}:{proof_type}".encode())
+        return base64.b64encode(key).decode()
     
     def _prepare_public_inputs(self, credential: dict) -> dict:
         """Prepare public inputs for proof generation."""
@@ -314,16 +357,4 @@ class ZKPProver:
                     self._executor,
                     lambda: self._run_zokrates_command(['setup'])
                 )
-                self.setup_done[proof_type] = True
-
-    def _generate_proof_id(self, credential_id: str, proof_type: str) -> str:
-        """Generate a unique proof ID."""
-        # Use HKDF to generate a deterministic ID
-        hkdf = HKDF(
-            algorithm=hashes.SHA256(),
-            length=16,
-            salt=None,
-            info=b'proof_id'
-        )
-        key = hkdf.derive(f"{credential_id}:{proof_type}".encode())
-        return base64.b64encode(key).decode() 
+                self.setup_done[proof_type] = True 
