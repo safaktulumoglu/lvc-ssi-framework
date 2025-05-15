@@ -9,7 +9,6 @@ import base64
 import os
 import asyncio
 import concurrent.futures
-import threading
 import time
 
 class DIDManager:
@@ -18,8 +17,8 @@ class DIDManager:
         self.did_documents: Dict[str, dict] = {}
         self.did_cache: Dict[str, tuple[dict, float]] = {}  # Cache with timestamp
         self.cache_ttl = 300  # Cache TTL in seconds
-        self._cache_lock = threading.Lock()
-        self._storage_lock = threading.Lock()
+        self._cache_lock = asyncio.Lock()
+        self._storage_lock = asyncio.Lock()
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         self._load_documents()
         
@@ -27,25 +26,24 @@ class DIDManager:
         """Load DID documents from storage file."""
         try:
             if os.path.exists(self.storage_file):
-                with self._storage_lock:
-                    with open(self.storage_file, 'r') as f:
-                        self.did_documents = json.load(f)
-                        # Initialize cache with loaded documents
-                        current_time = time.time()
-                        self.did_cache = {
-                            did: (doc, current_time)
-                            for did, doc in self.did_documents.items()
-                        }
+                with open(self.storage_file, 'r') as f:
+                    self.did_documents = json.load(f)
+                    # Initialize cache with loaded documents
+                    current_time = time.time()
+                    self.did_cache = {
+                        did: (doc, current_time)
+                        for did, doc in self.did_documents.items()
+                    }
         except Exception as e:
             print(f"Error loading DID documents: {str(e)}")
             self.did_documents = {}
             self.did_cache = {}
             
-    def _save_documents(self):
+    async def _save_documents(self):
         """Save DID documents to storage file."""
         try:
             os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
-            with self._storage_lock:
+            async with self._storage_lock:
                 with open(self.storage_file, 'w') as f:
                     json.dump(self.did_documents, f, indent=2)
         except Exception as e:
@@ -119,12 +117,12 @@ class DIDManager:
             }
             
             # Store DID document in both cache and storage
-            with self._cache_lock:
+            async with self._cache_lock:
                 self.did_cache[did] = (did_document, time.time())
             
-            with self._storage_lock:
+            async with self._storage_lock:
                 self.did_documents[did] = did_document
-                self._save_documents()
+                await self._save_documents()
             
             return did, did_document
             
@@ -143,7 +141,7 @@ class DIDManager:
             dict: The DID document if found, None otherwise
         """
         # Try cache first
-        with self._cache_lock:
+        async with self._cache_lock:
             if did in self.did_cache:
                 doc, timestamp = self.did_cache[did]
                 if time.time() - timestamp < self.cache_ttl:
@@ -152,20 +150,20 @@ class DIDManager:
                     del self.did_cache[did]  # Remove expired cache entry
             
         # Try memory
-        with self._storage_lock:
+        async with self._storage_lock:
             doc = self.did_documents.get(did)
             if doc:
-                with self._cache_lock:
+                async with self._cache_lock:
                     self.did_cache[did] = (doc, time.time())  # Update cache
                 return doc
             
         # If not found, try to load from storage
         try:
             self._load_documents()
-            with self._storage_lock:
+            async with self._storage_lock:
                 doc = self.did_documents.get(did)
                 if doc:
-                    with self._cache_lock:
+                    async with self._cache_lock:
                         self.did_cache[did] = (doc, time.time())  # Update cache
                 return doc
         except Exception as e:
@@ -183,12 +181,12 @@ class DIDManager:
             bool: True if successful, False otherwise
         """
         try:
-            with self._storage_lock:
+            async with self._storage_lock:
                 if did in self.did_documents:
                     del self.did_documents[did]
-                    self._save_documents()
+                    await self._save_documents()
                     
-                    with self._cache_lock:
+                    async with self._cache_lock:
                         if did in self.did_cache:
                             del self.did_cache[did]
                     return True
