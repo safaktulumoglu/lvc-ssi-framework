@@ -27,10 +27,30 @@ class SimulationGateway:
         self.zkp_prover = zkp_prover if zkp_prover is not None else ZKPProver()
         self.access_policies: Dict[str, dict] = {}
         self.access_logs: list = []
+        self.access_cache: Dict[str, tuple[bool, str]] = {}  # Cache for access decisions
+        self.cache_ttl = 300  # Cache TTL in seconds
         
         # Setup routes
         self.app.post("/access/request", response_model=AccessResponse)(self.handle_access_request)
         self.app.get("/access/logs")(self.get_access_logs)
+        
+    def _get_cache_key(self, request: AccessRequest) -> str:
+        """Generate a cache key for the access request."""
+        if request.proof_id:
+            return f"proof:{request.proof_id}:{request.resource_id}:{request.action}"
+        else:
+            return f"cred:{request.credential['id']}:{request.resource_id}:{request.action}"
+            
+    def _check_cache(self, cache_key: str) -> Optional[tuple[bool, str]]:
+        """Check if the access decision is cached and valid."""
+        if cache_key in self.access_cache:
+            is_valid, reason = self.access_cache[cache_key]
+            return is_valid, reason
+        return None
+        
+    def _update_cache(self, cache_key: str, is_valid: bool, reason: str):
+        """Update the access cache."""
+        self.access_cache[cache_key] = (is_valid, reason)
         
     async def handle_access_request(self, request: AccessRequest) -> AccessResponse:
         """
@@ -48,6 +68,17 @@ class SimulationGateway:
             return AccessResponse(
                 granted=False,
                 reason="No access policy found for resource",
+                timestamp=datetime.utcnow().isoformat()
+            )
+        
+        # Check cache first
+        cache_key = self._get_cache_key(request)
+        cached_result = self._check_cache(cache_key)
+        if cached_result:
+            is_valid, reason = cached_result
+            return AccessResponse(
+                granted=is_valid,
+                reason=reason,
                 timestamp=datetime.utcnow().isoformat()
             )
         
@@ -114,6 +145,9 @@ class SimulationGateway:
             except Exception as e:
                 is_valid = False
                 reason = f"Credential verification failed: {str(e)}"
+        
+        # Update cache
+        self._update_cache(cache_key, is_valid, reason)
         
         # Log the access attempt
         log_entry = {

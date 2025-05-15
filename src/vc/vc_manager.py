@@ -8,104 +8,123 @@ import base64
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+import time
 
 class VCManager:
     def __init__(self):
         self.issued_vcs: Dict[str, dict] = {}
         self.revoked_vcs: set = set()
+        self.verification_cache: Dict[str, tuple[bool, float]] = {}  # Cache for verification results with timestamp
+        self.cache_ttl = 300  # Cache TTL in seconds
         
     def issue_credential(self, 
-                        subject_did: str, 
+                        subject_did: str,
                         issuer_did: str,
                         credential_type: str,
                         attributes: dict,
                         private_key_pem: str,
-                        validity_days: int = 365) -> dict:
+                        validity_days: int = 30) -> dict:
         """
-        Issue a new Verifiable Credential.
-        
-        Args:
-            subject_did: DID of the credential subject
-            issuer_did: DID of the credential issuer
-            credential_type: Type of credential (e.g., 'simulation_access')
-            attributes: Dictionary of credential attributes
-            private_key_pem: PEM-encoded private key of the issuer
-            validity_days: Number of days the credential is valid
+        Issue a Verifiable Credential.
+        """
+        try:
+            # Generate credential ID
+            credential_id = f"vc:{subject_did}:{credential_type}:{int(time.time())}"
             
-        Returns:
-            dict: The issued Verifiable Credential
-        """
-        # Create credential ID
-        credential_id = f"vc:{base64.b64encode(subject_did.encode()).decode()[:16]}"
-        
-        # Create credential payload
-        now = datetime.utcnow()
-        payload = {
-            "@context": [
-                "https://www.w3.org/2018/credentials/v1",
-                "https://www.w3.org/2018/credentials/examples/v1"
-            ],
-            "id": credential_id,
-            "type": ["VerifiableCredential", credential_type],
-            "issuer": issuer_did,
-            "issuanceDate": now.isoformat(),
-            "expirationDate": (now + timedelta(days=validity_days)).isoformat(),
-            "credentialSubject": {
-                "id": subject_did,
-                **attributes
+            # Calculate expiration date
+            expiration_date = (datetime.utcnow() + timedelta(days=validity_days)).isoformat()
+            
+            # Create credential
+            credential = {
+                "@context": [
+                    "https://www.w3.org/2018/credentials/v1",
+                    "https://www.w3.org/2018/credentials/examples/v1"
+                ],
+                "id": credential_id,
+                "type": ["VerifiableCredential", credential_type],
+                "issuer": issuer_did,
+                "issuanceDate": datetime.utcnow().isoformat(),
+                "expirationDate": expiration_date,
+                "credentialSubject": {
+                    "id": subject_did,
+                    **attributes
+                }
             }
-        }
-        
-        # Load private key
-        private_key = serialization.load_pem_private_key(
-            private_key_pem.encode(),
-            password=None,
-            backend=default_backend()
-        )
-        
-        # Sign the credential using JWT
-        token = jwt.encode(
-            payload,
-            private_key,
-            algorithm='RS256',
-            headers={
-                'typ': 'JWT',
-                'alg': 'RS256',
-                'kid': f"{issuer_did}#keys-1"
+            
+            # Sign the credential
+            private_key = serialization.load_pem_private_key(
+                private_key_pem.encode(),
+                password=None,
+                backend=default_backend()
+            )
+            
+            # Create JWT
+            header = {
+                "alg": "RS256",
+                "typ": "JWT"
             }
-        )
-        
-        # Create the final credential
-        credential = {
-            **payload,
-            "proof": {
-                "type": "JwtProof2020",
-                "jwt": token
+            
+            payload = {
+                "iss": issuer_did,
+                "sub": subject_did,
+                "iat": int(time.time()),
+                "exp": int(datetime.fromisoformat(expiration_date).timestamp()),
+                "jti": credential_id,
+                "vc": credential
             }
-        }
-        
-        # Store the credential
-        self.issued_vcs[credential_id] = credential
-        
-        return credential
-    
+            
+            # Encode and sign
+            encoded_header = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip('=')
+            encoded_payload = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip('=')
+            
+            message = f"{encoded_header}.{encoded_payload}"
+            signature = private_key.sign(
+                message.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                algorithm=hashes.SHA256()
+            )
+            encoded_signature = base64.urlsafe_b64encode(signature).decode().rstrip('=')
+            
+            # Add proof
+            credential["proof"] = {
+                "type": "RsaSignature2018",
+                "created": datetime.utcnow().isoformat(),
+                "proofPurpose": "assertionMethod",
+                "verificationMethod": f"{issuer_did}#keys-1",
+                "jwt": f"{message}.{encoded_signature}"
+            }
+            
+            # Store credential
+            self.issued_vcs[credential_id] = credential
+            
+            return credential
+            
+        except Exception as e:
+            print(f"Error issuing credential: {str(e)}")
+            raise
+            
     def verify_credential(self, credential: dict, issuer_public_key_pem: str) -> bool:
         """
         Verify a Verifiable Credential.
-        
-        Args:
-            credential: The Verifiable Credential to verify
-            issuer_public_key_pem: PEM-encoded public key of the issuer
-            
-        Returns:
-            bool: True if valid, False otherwise
         """
+        # Check cache first
+        cache_key = f"{credential['id']}:{issuer_public_key_pem}"
+        if cache_key in self.verification_cache:
+            is_valid, timestamp = self.verification_cache[cache_key]
+            if time.time() - timestamp < self.cache_ttl:
+                return is_valid
+        
         # Check if credential is revoked
         if credential["id"] in self.revoked_vcs:
+            self.verification_cache[cache_key] = (False, time.time())
             return False
         
         # Check expiration
         if datetime.fromisoformat(credential["expirationDate"]) < datetime.utcnow():
+            self.verification_cache[cache_key] = (False, time.time())
             return False
         
         try:
@@ -130,9 +149,12 @@ class VCManager:
             )
             
             # Verify payload matches credential
-            return payload["id"] == credential["id"]
+            is_valid = payload["id"] == credential["id"]
+            self.verification_cache[cache_key] = (is_valid, time.time())
+            return is_valid
             
         except Exception:
+            self.verification_cache[cache_key] = (False, time.time())
             return False
     
     def revoke_credential(self, credential_id: str) -> bool:

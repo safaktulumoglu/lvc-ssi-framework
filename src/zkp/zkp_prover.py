@@ -6,12 +6,15 @@ import platform
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import base64
+from datetime import datetime
 
 class ZKPProver:
     def __init__(self):
         self.proof_cache: Dict[str, Any] = {}
         self.working_dir = os.path.join(os.path.dirname(__file__), '..', 'circuits')
         self.abs_working_dir = os.path.abspath(self.working_dir)
+        self.compiled_circuits: Dict[str, bool] = {}  # Track compiled circuits
+        self.setup_done: Dict[str, bool] = {}  # Track setup completion
         
     def _run_zokrates_command(self, command: list) -> subprocess.CompletedProcess:
         """Run a ZoKrates command using Docker."""
@@ -22,6 +25,19 @@ class ZKPProver:
         ] + command
         return subprocess.run(docker_cmd, check=True, capture_output=True, text=True)
         
+    def _ensure_circuit_ready(self, proof_type: str):
+        """Ensure circuit is compiled and setup is done."""
+        if not self.compiled_circuits.get(proof_type):
+            print(f"Compiling circuit for {proof_type}...")
+            circuit_path = os.path.join(self.working_dir, f"{proof_type}.zok")
+            self._run_zokrates_command(['compile', '-i', os.path.basename(circuit_path)])
+            self.compiled_circuits[proof_type] = True
+            
+        if not self.setup_done.get(proof_type):
+            print(f"Setting up circuit for {proof_type}...")
+            self._run_zokrates_command(['setup'])
+            self.setup_done[proof_type] = True
+
     def generate_proof(self, 
                       credential: dict,
                       proof_type: str,
@@ -38,54 +54,42 @@ class ZKPProver:
             dict: The generated proof
         """
         try:
+            # Ensure circuit is ready
+            self._ensure_circuit_ready(proof_type)
+            
             # Convert credential to proof inputs
             public_inputs = self._prepare_public_inputs(credential)
             
             # Prepare input files with absolute paths
             circuit_path = os.path.join(self.working_dir, f"{proof_type}.zok")
             witness_path = os.path.join(self.working_dir, f"{proof_type}.wtns")
-            proof_path = os.path.join(self.working_dir, "proof.json")  # ZoKrates default name
+            proof_path = os.path.join(self.working_dir, "proof.json")
             
             print(f"Circuit path: {circuit_path}")
             print(f"Witness path: {witness_path}")
             print(f"Proof path: {proof_path}")
             
-            # Compile the circuit
-            print("Compiling circuit...")
-            self._run_zokrates_command(['compile', '-i', os.path.basename(circuit_path)])
-            
-            # Setup the circuit
-            print("Setting up circuit...")
-            self._run_zokrates_command(['setup'])
-            
             # Convert inputs to field elements (integers)
-            # For credential_id, use a hash of the string
             hash_obj = hashes.Hash(hashes.SHA256())
             hash_obj.update(public_inputs["credential_id"].encode())
             credential_id_hash = int.from_bytes(hash_obj.finalize()[:8], byteorder='big')
             
-            # For issuer, use a hash of the DID
             hash_obj = hashes.Hash(hashes.SHA256())
             hash_obj.update(public_inputs["issuer"].encode())
             issuer_hash = int.from_bytes(hash_obj.finalize()[:8], byteorder='big')
             
-            # For expiration_date, convert to Unix timestamp
-            from datetime import datetime
             expiration_timestamp = int(datetime.fromisoformat(public_inputs["expiration_date"]).timestamp())
             
-            # For credential_type, use a hash
             hash_obj = hashes.Hash(hashes.SHA256())
             hash_obj.update(public_inputs["credential_type"].encode())
             type_hash = int.from_bytes(hash_obj.finalize()[:8], byteorder='big')
             
-            # For role and clearance_level, use simple integer mappings
             role_map = {"operator": 1, "commander": 2, "analyst": 3}
             clearance_map = {"low": 1, "medium": 2, "high": 3}
             
             role_value = role_map.get(private_inputs["role"], 0)
             clearance_value = clearance_map.get(private_inputs["clearance_level"], 0)
             
-            # Prepare witness input as a list of field elements
             witness_values = [
                 str(credential_id_hash),
                 str(issuer_hash),

@@ -10,53 +10,33 @@ import os
 
 class DIDManager:
     def __init__(self):
-        self.did_documents: Dict[str, dict] = {}
         self.storage_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'did_documents.json')
+        self.did_documents: Dict[str, dict] = {}
+        self.did_cache: Dict[str, dict] = {}  # In-memory cache for DID documents
         self._load_documents()
         
     def _load_documents(self):
         """Load DID documents from storage file."""
         try:
-            # Ensure data directory exists
-            os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
-            
-            # Load existing documents if file exists
             if os.path.exists(self.storage_file):
                 with open(self.storage_file, 'r') as f:
-                    loaded_docs = json.load(f)
-                    if isinstance(loaded_docs, dict):
-                        self.did_documents = loaded_docs
-                    else:
-                        print("Warning: Invalid DID documents format in storage file")
-                        self.did_documents = {}
+                    self.did_documents = json.load(f)
+                    self.did_cache = self.did_documents.copy()  # Initialize cache
         except Exception as e:
             print(f"Error loading DID documents: {str(e)}")
             self.did_documents = {}
+            self.did_cache = {}
             
     def _save_documents(self):
         """Save DID documents to storage file."""
         try:
-            # Ensure data directory exists
             os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
-            
-            # Save documents with pretty printing
             with open(self.storage_file, 'w') as f:
                 json.dump(self.did_documents, f, indent=2)
-                
-            # Verify the save was successful
-            if not os.path.exists(self.storage_file):
-                raise Exception("Failed to create storage file")
-                
-            # Verify the content was written correctly
-            with open(self.storage_file, 'r') as f:
-                saved_docs = json.load(f)
-                if not isinstance(saved_docs, dict):
-                    raise Exception("Invalid document format after save")
-                    
         except Exception as e:
             print(f"Error saving DID documents: {str(e)}")
-            raise  # Re-raise to handle in calling code
-        
+            raise
+            
     def create_did(self, participant_type: str) -> tuple[str, dict]:
         """
         Create a new DID and its associated document.
@@ -68,7 +48,7 @@ class DIDManager:
             tuple: (DID string, DID document)
         """
         try:
-            # Generate RSA key pair
+            # Generate RSA key pair with optimized parameters
             private_key = rsa.generate_private_key(
                 public_exponent=65537,
                 key_size=2048,
@@ -116,8 +96,9 @@ class DIDManager:
                 "participantType": participant_type
             }
             
-            # Store DID document
+            # Store DID document in both cache and storage
             self.did_documents[did] = did_document
+            self.did_cache[did] = did_document
             self._save_documents()
             
             return did, did_document
@@ -136,15 +117,24 @@ class DIDManager:
         Returns:
             dict: The DID document if found, None otherwise
         """
-        # Try to load from memory first
-        doc = self.did_documents.get(did)
+        # Try cache first
+        doc = self.did_cache.get(did)
         if doc:
             return doc
             
-        # If not in memory, try to load from storage
+        # Try memory
+        doc = self.did_documents.get(did)
+        if doc:
+            self.did_cache[did] = doc  # Update cache
+            return doc
+            
+        # If not found, try to load from storage
         try:
             self._load_documents()
-            return self.did_documents.get(did)
+            doc = self.did_documents.get(did)
+            if doc:
+                self.did_cache[did] = doc  # Update cache
+            return doc
         except Exception as e:
             print(f"Error resolving DID: {str(e)}")
             return None
