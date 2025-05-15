@@ -213,8 +213,8 @@ class ZKPProver:
         
         # Format inputs according to circuit requirements
         # Convert credential_id and issuer to field elements (simple hash)
-        credential_id = int(hashlib.sha256(inputs['credential_id'].encode()).hexdigest()[:16], 16)
-        issuer = int(hashlib.sha256(inputs['issuer'].encode()).hexdigest()[:16], 16)
+        credential_id = int(hashlib.sha256(inputs['credential_id'].encode()).hexdigest()[:16], 16) % (2**128 - 1)
+        issuer = int(hashlib.sha256(inputs['issuer'].encode()).hexdigest()[:16], 16) % (2**128 - 1)
         
         # Convert expiration date to timestamp
         expiration_date = int(datetime.fromisoformat(inputs['expiration_date'].replace('Z', '+00:00')).timestamp())
@@ -245,8 +245,8 @@ class ZKPProver:
         try:
             print(f"Computing witness for {circuit_name}")  # Debug logging
             
-            # Convert all inputs to strings
-            input_args = [str(x) for x in witness_inputs]
+            # Convert all inputs to strings and ensure they're within field range
+            input_args = [str(x % (2**128 - 1)) for x in witness_inputs]
             print(f"Input arguments: {' '.join(input_args)}")  # Debug logging
             
             # Run compute-witness command
