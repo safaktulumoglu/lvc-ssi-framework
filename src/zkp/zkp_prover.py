@@ -89,7 +89,7 @@ class ZKPProver:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"ZoKrates command failed: {e.stderr}")
     
-    async def _compile_circuit(self, circuit_name: str) -> str:
+    async def _compile_circuit(self, circuit_name: str) -> Path:
         """Compile a circuit using Docker with enhanced caching and timeout."""
         circuit_path = self._circuit_dir / f"{circuit_name}.zok"
         if not circuit_path.exists():
@@ -98,13 +98,13 @@ class ZKPProver:
         # Check cache with file hash
         file_hash = self._get_file_hash(str(circuit_path))
         if file_hash in self._circuit_cache:
-            return self._circuit_cache[file_hash]
+            return Path(self._circuit_cache[file_hash])
         
         # Use circuit lock for thread safety with timeout
         try:
             async with self._circuit_lock:
                 if file_hash in self._circuit_cache:
-                    return self._circuit_cache[file_hash]
+                    return Path(self._circuit_cache[file_hash])
                 
                 # Compile circuit using Docker
                 loop = asyncio.get_event_loop()
@@ -112,7 +112,7 @@ class ZKPProver:
                     result = await asyncio.wait_for(
                         loop.run_in_executor(
                             self._executor,
-                            lambda: self._run_zokrates_command(['compile', '-i', circuit_path.name])
+                            lambda: self._run_zokrates_command(['compile', '-i', str(circuit_path)])
                         ),
                         timeout=self._timeout
                     )
@@ -120,26 +120,26 @@ class ZKPProver:
                         raise RuntimeError(f"Failed to compile circuit: {result.stderr}")
                     
                     self._circuit_cache[file_hash] = str(circuit_path)
-                    return str(circuit_path)
+                    return circuit_path
                 except asyncio.TimeoutError:
                     raise RuntimeError(f"Circuit compilation timed out after {self._timeout} seconds")
         except Exception as e:
             raise RuntimeError(f"Error compiling circuit: {str(e)}")
     
-    async def _setup_circuit(self, circuit_name: str) -> str:
+    async def _setup_circuit(self, circuit_name: str) -> Path:
         """Set up a circuit using Docker with enhanced caching and timeout."""
         try:
             circuit_path = await self._compile_circuit(circuit_name)
             
             # Check cache with file hash
-            file_hash = self._get_file_hash(circuit_path)
+            file_hash = self._get_file_hash(str(circuit_path))
             if file_hash in self._setup_cache:
-                return self._setup_cache[file_hash]
+                return Path(self._setup_cache[file_hash])
             
             # Use circuit lock for thread safety with timeout
             async with self._circuit_lock:
                 if file_hash in self._setup_cache:
-                    return self._setup_cache[file_hash]
+                    return Path(self._setup_cache[file_hash])
                 
                 # Setup circuit using Docker
                 loop = asyncio.get_event_loop()
@@ -155,13 +155,13 @@ class ZKPProver:
                         raise RuntimeError(f"Failed to setup circuit: {result.stderr}")
                     
                     self._setup_cache[file_hash] = str(circuit_path)
-                    return str(circuit_path)
+                    return circuit_path
                 except asyncio.TimeoutError:
                     raise RuntimeError(f"Circuit setup timed out after {self._timeout} seconds")
         except Exception as e:
             raise RuntimeError(f"Error setting up circuit: {str(e)}")
     
-    async def _compute_witness(self, circuit_name: str, inputs: Dict[str, Any]) -> str:
+    async def _compute_witness(self, circuit_name: str, inputs: Dict[str, Any]) -> Path:
         """Compute witness using Docker with caching."""
         circuit_path = await self._setup_circuit(circuit_name)
         witness_path = self._circuit_dir / f"{circuit_name}.wtns"
@@ -172,7 +172,7 @@ class ZKPProver:
         
         # Check witness cache
         if cache_key in self._witness_cache:
-            return self._witness_cache[cache_key]
+            return Path(self._witness_cache[cache_key])
         
         # Convert inputs to witness format
         witness_inputs = []
@@ -194,8 +194,8 @@ class ZKPProver:
                 self._executor,
                 lambda: self._run_zokrates_command([
                     'compute-witness',
-                    '-i', circuit_path.name,
-                    '-o', witness_path.name,
+                    '-i', str(circuit_path),
+                    '-o', str(witness_path),
                     '-a'
                 ] + [str(x) for x in witness_inputs])
             )
@@ -203,7 +203,7 @@ class ZKPProver:
                 raise RuntimeError(f"Failed to compute witness: {result.stderr}")
             
             self._witness_cache[cache_key] = str(witness_path)
-            return str(witness_path)
+            return witness_path
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to compute witness: {e.stderr}")
     
@@ -261,9 +261,9 @@ class ZKPProver:
                         self._executor,
                         lambda: self._run_zokrates_command([
                             'generate-proof',
-                            '-i', circuit_path.name,
-                            '-w', witness_path.name,
-                            '-p', proof_path.name
+                            '-i', str(circuit_path),
+                            '-w', str(witness_path),
+                            '-p', str(proof_path)
                         ])
                     ),
                     timeout=self._timeout
