@@ -200,6 +200,7 @@ class ZKPProver:
         """Compute witness using Docker with caching."""
         circuit_path = await self._setup_circuit(circuit_name)
         witness_path = self._circuit_dir / f"{circuit_name}.wtns"
+        compiled_path = self._circuit_dir / "out"  # Use the compiled .out file
         
         # Generate cache key from inputs
         input_hash = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
@@ -240,32 +241,24 @@ class ZKPProver:
         
         print(f"Processed witness inputs: {witness_inputs}")  # Debug logging
         
-        # Write witness inputs to file in ZoKrates format
-        input_file_path = self._circuit_dir / f"{circuit_name}_inputs.txt"
-        with open(input_file_path, 'w') as f:
-            # Write number of inputs
-            f.write(f"{len(witness_inputs)}\n")
-            # Write each input on a new line
-            for input_value in witness_inputs:
-                f.write(f"{input_value}\n")
-        
-        print(f"Witness inputs written to: {input_file_path}")  # Debug logging
-        print(f"Input file contents:\n{input_file_path.read_text()}")  # Debug logging
-        
         # Compute witness using Docker
         loop = asyncio.get_event_loop()
         try:
             print(f"Computing witness for {circuit_name}")  # Debug logging
             
-            # Run compute-witness command
+            # Convert all inputs to strings
+            input_args = [str(x) for x in witness_inputs]
+            print(f"Input arguments: {' '.join(input_args)}")  # Debug logging
+            
+            # Run compute-witness command using the compiled .out file
             result = await loop.run_in_executor(
                 self._executor,
                 lambda: self._run_zokrates_command([
                     'compute-witness',
-                    '-i', circuit_path.name,
+                    '-i', compiled_path.name,  # Use compiled .out file
                     '-o', witness_path.name,
-                    '-a', input_file_path.name
-                ])
+                    '-a'
+                ] + input_args)
             )
             
             if result.returncode != 0:
@@ -273,10 +266,9 @@ class ZKPProver:
                 print(f"Witness computation failed with output: {result.stdout}")  # Debug logging
                 print(f"Witness computation failed with error: {result.stderr}")  # Debug logging
                 print(f"Circuit path: {circuit_path}")  # Debug logging
+                print(f"Compiled path: {compiled_path}")  # Debug logging
                 print(f"Witness path: {witness_path}")  # Debug logging
-                print(f"Input file path: {input_file_path}")  # Debug logging
-                print(f"Input file exists: {input_file_path.exists()}")  # Debug logging
-                print(f"Input file size: {input_file_path.stat().st_size} bytes")  # Debug logging
+                print(f"Command: {' '.join(['compute-witness', '-i', compiled_path.name, '-o', witness_path.name, '-a'] + input_args)}")  # Debug logging
                 raise RuntimeError(f"Failed to compute witness: {result.stderr}")
             
             print(f"Witness computation successful for {circuit_name}")  # Debug logging
