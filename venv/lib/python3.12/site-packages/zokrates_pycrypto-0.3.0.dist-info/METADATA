@@ -1,0 +1,11 @@
+Metadata-Version: 2.1
+Name: zokrates-pycrypto
+Version: 0.3.0
+Summary: Accompanying crypto application code for the zkSNARKs toolbox ZoKrates
+Author: sdeml
+Author-email: stefandeml@gmail.com
+Requires-Python: >=3.6,<4.0
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Requires-Dist: bitstring (>=3.1,<4.0)

@@ -1,0 +1,37 @@
+{
+  "inputs": [
+    {
+      "name": "credential_id",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "issuer",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "expiration_date",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "credential_type",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "role",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "clearance_level",
+      "public": false,
+      "type": "field"
+    }
+  ],
+  "output": {
+    "type": "bool"
+  }
+}
