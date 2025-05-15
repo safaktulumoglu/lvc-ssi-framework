@@ -226,15 +226,24 @@ class ZKPProver:
         loop = asyncio.get_event_loop()
         try:
             print(f"Computing witness for {circuit_name}")  # Debug logging
+            print(f"Using input file: {input_file}")  # Debug logging
+            
+            # First, write inputs to a file that ZoKrates can read
+            input_file_path = self._circuit_dir / f"{circuit_name}_inputs.txt"
+            with open(input_file_path, 'w') as f:
+                for input_value in witness_inputs:
+                    f.write(f"{input_value}\n")
+            
             result = await loop.run_in_executor(
                 self._executor,
                 lambda: self._run_zokrates_command([
                     'compute-witness',
                     '-i', circuit_path.name,
                     '-o', witness_path.name,
-                    '-a'
-                ] + [str(x) for x in witness_inputs])
+                    '-a', str(input_file_path.name)
+                ])
             )
+            
             if result.returncode != 0:
                 print(f"Witness computation failed with output: {result.stdout}")  # Debug logging
                 print(f"Witness computation failed with error: {result.stderr}")  # Debug logging
