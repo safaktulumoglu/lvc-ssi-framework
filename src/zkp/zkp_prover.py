@@ -77,13 +77,17 @@ class ZKPProver:
     
     def _run_zokrates_command(self, command: list) -> subprocess.CompletedProcess:
         """Run a ZoKrates command using Docker with timeout."""
+        # Convert circuit_dir to absolute path
+        circuit_dir_abs = str(self._circuit_dir.absolute())
+        
         docker_cmd = [
-            'docker', 'run', '-v', f'{self._circuit_dir}:/home/zokrates/code',
+            'docker', 'run', '-v', f'{circuit_dir_abs}:/home/zokrates/code',
             '-w', '/home/zokrates/code', 'zokrates/zokrates',
             '/home/zokrates/.zokrates/bin/zokrates'
         ] + command
         
         print(f"Running ZoKrates command: {' '.join(docker_cmd)}")  # Debug logging
+        print(f"Circuit directory: {circuit_dir_abs}")  # Debug logging
         
         try:
             result = subprocess.run(docker_cmd, check=True, capture_output=True, text=True, timeout=self._timeout)
@@ -130,7 +134,7 @@ class ZKPProver:
                     result = await asyncio.wait_for(
                         loop.run_in_executor(
                             self._executor,
-                            lambda: self._run_zokrates_command(['compile', '-i', str(circuit_path)])
+                            lambda: self._run_zokrates_command(['compile', '-i', circuit_path.name])
                         ),
                         timeout=self._timeout
                     )
