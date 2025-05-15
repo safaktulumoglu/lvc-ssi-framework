@@ -82,12 +82,26 @@ class ZKPProver:
             '-w', '/home/zokrates/code', 'zokrates/zokrates',
             '/home/zokrates/.zokrates/bin/zokrates'
         ] + command
+        
+        print(f"Running ZoKrates command: {' '.join(docker_cmd)}")  # Debug logging
+        
         try:
-            return subprocess.run(docker_cmd, check=True, capture_output=True, text=True, timeout=self._timeout)
-        except subprocess.TimeoutExpired:
+            result = subprocess.run(docker_cmd, check=True, capture_output=True, text=True, timeout=self._timeout)
+            print(f"ZoKrates command output: {result.stdout}")  # Debug logging
+            return result
+        except subprocess.TimeoutExpired as e:
+            print(f"ZoKrates command timed out after {self._timeout} seconds")
+            print(f"Command output before timeout: {e.stdout.decode() if e.stdout else 'None'}")
+            print(f"Command error before timeout: {e.stderr.decode() if e.stderr else 'None'}")
             raise RuntimeError(f"ZoKrates command timed out after {self._timeout} seconds")
         except subprocess.CalledProcessError as e:
+            print(f"ZoKrates command failed with return code {e.returncode}")
+            print(f"Command output: {e.stdout}")
+            print(f"Command error: {e.stderr}")
             raise RuntimeError(f"ZoKrates command failed: {e.stderr}")
+        except Exception as e:
+            print(f"Unexpected error running ZoKrates command: {str(e)}")
+            raise RuntimeError(f"Unexpected error running ZoKrates command: {str(e)}")
     
     async def _compile_circuit(self, circuit_name: str) -> Path:
         """Compile a circuit using Docker with enhanced caching and timeout."""
@@ -95,9 +109,12 @@ class ZKPProver:
         if not circuit_path.exists():
             raise FileNotFoundError(f"Circuit file not found: {circuit_path}")
         
+        print(f"Compiling circuit: {circuit_path}")  # Debug logging
+        
         # Check cache with file hash
         file_hash = self._get_file_hash(str(circuit_path))
         if file_hash in self._circuit_cache:
+            print(f"Using cached circuit: {self._circuit_cache[file_hash]}")  # Debug logging
             return Path(self._circuit_cache[file_hash])
         
         # Use circuit lock for thread safety with timeout
@@ -109,6 +126,7 @@ class ZKPProver:
                 # Compile circuit using Docker
                 loop = asyncio.get_event_loop()
                 try:
+                    print(f"Running circuit compilation for {circuit_path}")  # Debug logging
                     result = await asyncio.wait_for(
                         loop.run_in_executor(
                             self._executor,
@@ -117,23 +135,30 @@ class ZKPProver:
                         timeout=self._timeout
                     )
                     if result.returncode != 0:
+                        print(f"Circuit compilation failed with output: {result.stdout}")  # Debug logging
+                        print(f"Circuit compilation failed with error: {result.stderr}")  # Debug logging
                         raise RuntimeError(f"Failed to compile circuit: {result.stderr}")
                     
+                    print(f"Circuit compilation successful for {circuit_path}")  # Debug logging
                     self._circuit_cache[file_hash] = str(circuit_path)
                     return circuit_path
                 except asyncio.TimeoutError:
+                    print(f"Circuit compilation timed out after {self._timeout} seconds")  # Debug logging
                     raise RuntimeError(f"Circuit compilation timed out after {self._timeout} seconds")
         except Exception as e:
+            print(f"Error compiling circuit: {str(e)}")  # Debug logging
             raise RuntimeError(f"Error compiling circuit: {str(e)}")
     
     async def _setup_circuit(self, circuit_name: str) -> Path:
         """Set up a circuit using Docker with enhanced caching and timeout."""
         try:
+            print(f"Setting up circuit: {circuit_name}")  # Debug logging
             circuit_path = await self._compile_circuit(circuit_name)
             
             # Check cache with file hash
             file_hash = self._get_file_hash(str(circuit_path))
             if file_hash in self._setup_cache:
+                print(f"Using cached setup for circuit: {circuit_name}")  # Debug logging
                 return Path(self._setup_cache[file_hash])
             
             # Use circuit lock for thread safety with timeout
@@ -144,6 +169,7 @@ class ZKPProver:
                 # Setup circuit using Docker
                 loop = asyncio.get_event_loop()
                 try:
+                    print(f"Running circuit setup for {circuit_name}")  # Debug logging
                     result = await asyncio.wait_for(
                         loop.run_in_executor(
                             self._executor,
@@ -152,13 +178,18 @@ class ZKPProver:
                         timeout=self._timeout
                     )
                     if result.returncode != 0:
+                        print(f"Circuit setup failed with output: {result.stdout}")  # Debug logging
+                        print(f"Circuit setup failed with error: {result.stderr}")  # Debug logging
                         raise RuntimeError(f"Failed to setup circuit: {result.stderr}")
                     
+                    print(f"Circuit setup successful for {circuit_name}")  # Debug logging
                     self._setup_cache[file_hash] = str(circuit_path)
                     return circuit_path
                 except asyncio.TimeoutError:
+                    print(f"Circuit setup timed out after {self._timeout} seconds")  # Debug logging
                     raise RuntimeError(f"Circuit setup timed out after {self._timeout} seconds")
         except Exception as e:
+            print(f"Error setting up circuit: {str(e)}")  # Debug logging
             raise RuntimeError(f"Error setting up circuit: {str(e)}")
     
     async def _compute_witness(self, circuit_name: str, inputs: Dict[str, Any]) -> Path:
