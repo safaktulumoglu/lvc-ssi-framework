@@ -240,14 +240,18 @@ class ZKPProver:
         
         print(f"Processed witness inputs: {witness_inputs}")  # Debug logging
         
+        # Write witness inputs to file
+        input_file_path = self._circuit_dir / f"{circuit_name}_inputs.txt"
+        with open(input_file_path, 'w') as f:
+            for input_value in witness_inputs:
+                f.write(f"{input_value}\n")
+        
+        print(f"Witness inputs written to: {input_file_path}")  # Debug logging
+        
         # Compute witness using Docker
         loop = asyncio.get_event_loop()
         try:
             print(f"Computing witness for {circuit_name}")  # Debug logging
-            
-            # Convert all inputs to strings
-            input_args = [str(x) for x in witness_inputs]
-            print(f"Input arguments: {' '.join(input_args)}")  # Debug logging
             
             result = await loop.run_in_executor(
                 self._executor,
@@ -255,8 +259,8 @@ class ZKPProver:
                     'compute-witness',
                     '-i', circuit_path.name,
                     '-o', witness_path.name,
-                    '-a'
-                ] + input_args)
+                    '-a', input_file_path.name
+                ])
             )
             
             if result.returncode != 0:
