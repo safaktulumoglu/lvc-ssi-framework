@@ -339,9 +339,9 @@ class ZKPProver:
                         self._executor,
                         lambda: self._run_zokrates_command([
                             'generate-proof',
-                            '-i', str(circuit_path),
-                            '-w', str(witness_path),
-                            '-p', str(proof_path)
+                            '-i', 'out',  # Use the compiled .out file
+                            '-w', witness_path.name,
+                            '-p', proof_path.name
                         ])
                     ),
                     timeout=self._timeout
