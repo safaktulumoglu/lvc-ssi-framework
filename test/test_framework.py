@@ -37,16 +37,18 @@ async def main():
             # Get the private key from the commander's DID document
             private_key_pem = commander_doc["verificationMethod"][0]["privateKeyPem"]
             
+            # Create credential with all required arguments in correct order
             credential = await vc_manager.issue_credential(
-                operator_did,  # subject_did
-                commander_did,  # issuer_did
-                "SimulationAccess",  # credential_type
-                {  # attributes
+                subject_did=operator_did,
+                issuer_did=commander_did,
+                credential_type="SimulationAccess",
+                attributes={
                     "role": "simulation_operator",
                     "clearance": "top_secret",
                     "simulations": ["tactical", "strategic"]
                 },
-                private_key_pem  # private_key_pem as positional argument
+                private_key_pem=private_key_pem,
+                validity_days=30  # Optional, defaults to 30
             )
             print(f"Issued Credential: {json.dumps(credential, indent=2)}")
         
