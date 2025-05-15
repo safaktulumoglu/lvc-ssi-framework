@@ -75,7 +75,7 @@ class ZKPProver:
         with open(file_path, 'rb') as f:
             return hashlib.sha256(f.read()).hexdigest()
     
-    def _run_zokrates_command(self, command: list) -> subprocess.CompletedProcess:
+    def _run_zokrates_command(self, command: list, input: str = None) -> subprocess.CompletedProcess:
         """Run a ZoKrates command using Docker with timeout."""
         # Convert circuit_dir to absolute path
         circuit_dir_abs = str(self._circuit_dir.absolute())
@@ -90,7 +90,7 @@ class ZKPProver:
         print(f"Circuit directory: {circuit_dir_abs}")  # Debug logging
         
         try:
-            result = subprocess.run(docker_cmd, check=True, capture_output=True, text=True, timeout=self._timeout)
+            result = subprocess.run(docker_cmd, check=True, capture_output=True, text=True, timeout=self._timeout, input=input)
             print(f"ZoKrates command output: {result.stdout}")  # Debug logging
             return result
         except subprocess.TimeoutExpired as e:
@@ -243,11 +243,14 @@ class ZKPProver:
         # Write witness inputs to file in ZoKrates format
         input_file_path = self._circuit_dir / f"{circuit_name}_inputs.txt"
         with open(input_file_path, 'w') as f:
+            # Write number of inputs
+            f.write(f"{len(witness_inputs)}\n")
             # Write each input on a new line
             for input_value in witness_inputs:
                 f.write(f"{input_value}\n")
         
         print(f"Witness inputs written to: {input_file_path}")  # Debug logging
+        print(f"Input file contents:\n{input_file_path.read_text()}")  # Debug logging
         
         # Compute witness using Docker
         loop = asyncio.get_event_loop()
@@ -266,8 +269,14 @@ class ZKPProver:
             )
             
             if result.returncode != 0:
+                print(f"Witness computation failed with return code: {result.returncode}")  # Debug logging
                 print(f"Witness computation failed with output: {result.stdout}")  # Debug logging
                 print(f"Witness computation failed with error: {result.stderr}")  # Debug logging
+                print(f"Circuit path: {circuit_path}")  # Debug logging
+                print(f"Witness path: {witness_path}")  # Debug logging
+                print(f"Input file path: {input_file_path}")  # Debug logging
+                print(f"Input file exists: {input_file_path.exists()}")  # Debug logging
+                print(f"Input file size: {input_file_path.stat().st_size} bytes")  # Debug logging
                 raise RuntimeError(f"Failed to compute witness: {result.stderr}")
             
             print(f"Witness computation successful for {circuit_name}")  # Debug logging
@@ -275,7 +284,14 @@ class ZKPProver:
             return witness_path
         except subprocess.CalledProcessError as e:
             print(f"Error computing witness: {e.stderr}")  # Debug logging
+            print(f"Error return code: {e.returncode}")  # Debug logging
+            print(f"Error command: {e.cmd}")  # Debug logging
+            print(f"Error output: {e.output}")  # Debug logging
             raise RuntimeError(f"Failed to compute witness: {e.stderr}")
+        except Exception as e:
+            print(f"Unexpected error during witness computation: {str(e)}")  # Debug logging
+            print(f"Error type: {type(e)}")  # Debug logging
+            raise RuntimeError(f"Unexpected error during witness computation: {str(e)}")
     
     async def generate_proof(self, credential: Dict[str, Any], proof_type: str, private_inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Generate a zero-knowledge proof with optimized caching and timeout handling."""
