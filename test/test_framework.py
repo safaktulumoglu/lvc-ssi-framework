@@ -56,27 +56,29 @@ async def main():
         # 3. Generate ZKP
         print("\n3. Generating ZKP...")
         async with perf_monitor.measure("zkp_generation"):
-            # Compile circuits
-            await zkp_prover.compile_circuits()
-            
-            # Setup prover
-            await zkp_prover.setup()
-            
-            # Generate witness
-            witness = await zkp_prover.generate_witness(
-                credential=credential,
-                revealed_attributes=["role", "clearance"]
-            )
-            
             # Generate proof
-            proof = await zkp_prover.generate_proof(witness)
+            proof = await zkp_prover.generate_proof(
+                credential=credential,
+                proof_type="access_control",
+                private_inputs={
+                    "role": "simulation_operator",
+                    "clearance_level": "top_secret"
+                }
+            )
             print(f"Generated ZKP: {json.dumps(proof, indent=2)}")
         
         # 4. Verify ZKP
         print("\n4. Verifying ZKP...")
         async with perf_monitor.measure("zkp_verification"):
-            verifier = ZKPVerifier()
-            is_valid = await verifier.verify_proof(proof)
+            is_valid = await zkp_prover.verify_proof(
+                proof=proof,
+                public_inputs={
+                    "credential_id": credential["id"],
+                    "issuer": credential["issuer"],
+                    "expiration_date": credential["expirationDate"],
+                    "credential_type": credential["type"][1]
+                }
+            )
             print(f"Proof valid: {is_valid}")
         
         # Print performance metrics
