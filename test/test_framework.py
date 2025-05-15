@@ -39,16 +39,16 @@ async def main():
             
             # Create credential with all required arguments in correct order
             credential = await vc_manager.issue_credential(
-                subject_did=operator_did,
-                issuer_did=commander_did,
-                credential_type="SimulationAccess",
-                attributes={
+                operator_did,  # subject_did
+                commander_did,  # issuer_did
+                "SimulationAccess",  # credential_type
+                {  # attributes
                     "role": "simulation_operator",
                     "clearance": "top_secret",
                     "simulations": ["tactical", "strategic"]
                 },
-                private_key_pem=private_key_pem,
-                validity_days=30  # Optional, defaults to 30
+                private_key_pem,  # private_key_pem as positional argument
+                30  # validity_days (optional)
             )
             print(f"Issued Credential: {json.dumps(credential, indent=2)}")
         
