@@ -25,14 +25,15 @@ class ZKPProver:
         self._setup_cache = {}
         self._circuit_dir = Path(__file__).parent.parent / "circuits"
         self._circuit_dir.mkdir(exist_ok=True)
-        self._proof_cache_lock = threading.Lock()
-        self._circuit_lock = threading.Lock()
+        self._proof_cache_lock = asyncio.Lock()
+        self._circuit_lock = asyncio.Lock()
         self.compiled_circuits = {}
         self.setup_done = {}
         self.proof_cache = {}
         self._witness_cache = {}
         self._verifier_cache = {}
         self._timeout = 30  # Default timeout in seconds
+        self._cleanup_tasks = set()
         
         # Ensure Docker is available
         try:
@@ -49,6 +50,19 @@ class ZKPProver:
             raise RuntimeError(f"Failed to pull ZoKrates Docker image: {e.stderr.decode()}")
         except subprocess.TimeoutExpired:
             raise RuntimeError("Docker pull timed out. Please check your internet connection.")
+    
+    async def cleanup(self):
+        """Cleanup resources and cancel pending tasks."""
+        for task in self._cleanup_tasks:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._cleanup_tasks.clear()
+        if hasattr(self, '_executor'):
+            self._executor.shutdown(wait=False)
     
     def __del__(self):
         """Cleanup thread pool executor on deletion."""
@@ -88,7 +102,7 @@ class ZKPProver:
         
         # Use circuit lock for thread safety with timeout
         try:
-            with self._circuit_lock:
+            async with self._circuit_lock:
                 if file_hash in self._circuit_cache:
                     return self._circuit_cache[file_hash]
                 
@@ -123,7 +137,7 @@ class ZKPProver:
                 return self._setup_cache[file_hash]
             
             # Use circuit lock for thread safety with timeout
-            with self._circuit_lock:
+            async with self._circuit_lock:
                 if file_hash in self._setup_cache:
                     return self._setup_cache[file_hash]
                 
@@ -198,7 +212,7 @@ class ZKPProver:
         try:
             # Check cache first
             proof_id = self._generate_proof_id(credential["id"], proof_type)
-            with self._proof_cache_lock:
+            async with self._proof_cache_lock:
                 if proof_id in self.proof_cache:
                     return {
                         "proof_id": proof_id,
@@ -217,14 +231,25 @@ class ZKPProver:
                 setup_task = asyncio.create_task(self._setup_circuit(proof_type))
                 witness_task = asyncio.create_task(self._compute_witness(proof_type, witness_inputs))
                 
+                # Add tasks to cleanup set
+                self._cleanup_tasks.update({circuit_task, setup_task, witness_task})
+                
                 # Wait for all tasks to complete with timeout
                 circuit_path, setup_path, witness_path = await asyncio.wait_for(
                     asyncio.gather(circuit_task, setup_task, witness_task),
                     timeout=self._timeout * 3  # Allow more time for parallel operations
                 )
+                
+                # Remove completed tasks from cleanup set
+                self._cleanup_tasks.difference_update({circuit_task, setup_task, witness_task})
+                
             except asyncio.TimeoutError:
+                # Cancel all pending tasks
+                await self.cleanup()
                 raise RuntimeError(f"Proof generation timed out after {self._timeout * 3} seconds")
             except Exception as e:
+                # Cancel all pending tasks
+                await self.cleanup()
                 raise RuntimeError(f"Error during proof generation setup: {str(e)}")
             
             # Generate proof using Docker
@@ -258,7 +283,7 @@ class ZKPProver:
                 }
                 
                 # Cache the proof
-                with self._proof_cache_lock:
+                async with self._proof_cache_lock:
                     self.proof_cache[proof_id] = proof
                 
                 return {
