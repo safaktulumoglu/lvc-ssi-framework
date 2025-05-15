@@ -240,9 +240,12 @@ class ZKPProver:
         
         print(f"Processed witness inputs: {witness_inputs}")  # Debug logging
         
-        # Write witness inputs to file
+        # Write witness inputs to file in ZoKrates format
         input_file_path = self._circuit_dir / f"{circuit_name}_inputs.txt"
         with open(input_file_path, 'w') as f:
+            # Write number of inputs
+            f.write(f"{len(witness_inputs)}\n")
+            # Write each input on a new line
             for input_value in witness_inputs:
                 f.write(f"{input_value}\n")
         
