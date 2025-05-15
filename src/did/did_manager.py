@@ -20,7 +20,7 @@ class DIDManager:
         self.cache_ttl = 300  # Cache TTL in seconds
         self._semaphore = asyncio.Semaphore(1)  # Allow only one operation at a time
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        self._operation_timeout = 5.0  # 5 seconds timeout for operations
+        self._operation_timeout = 10.0  # 10 seconds timeout for operations
         asyncio.create_task(self._load_documents())
         
     async def _load_documents(self):
@@ -49,10 +49,8 @@ class DIDManager:
         """Save DID documents to storage file."""
         try:
             os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
-            async with asyncio.timeout(self._operation_timeout):
-                async with self._semaphore:
-                    async with aiofiles.open(self.storage_file, 'w') as f:
-                        await f.write(json.dumps(self.did_documents, indent=2))
+            async with aiofiles.open(self.storage_file, 'w') as f:
+                await f.write(json.dumps(self.did_documents, indent=2))
         except Exception as e:
             print(f"Error saving DID documents: {str(e)}")
             raise
@@ -132,6 +130,9 @@ class DIDManager:
             
             return did, did_document
             
+        except asyncio.TimeoutError:
+            print(f"Operation timed out after {self._operation_timeout} seconds")
+            raise
         except Exception as e:
             print(f"Error creating DID: {str(e)}")
             raise
@@ -146,32 +147,36 @@ class DIDManager:
         Returns:
             dict: The DID document if found, None otherwise
         """
-        async with asyncio.timeout(self._operation_timeout):
-            async with self._semaphore:
-                # Try cache first
-                if did in self.did_cache:
-                    doc, timestamp = self.did_cache[did]
-                    if time.time() - timestamp < self.cache_ttl:
-                        return doc
-                    else:
-                        del self.did_cache[did]  # Remove expired cache entry
-                
-                # Try memory
-                doc = self.did_documents.get(did)
-                if doc:
-                    self.did_cache[did] = (doc, time.time())  # Update cache
-                    return doc
-                
-                # If not found, try to load from storage
-                try:
-                    await self._load_documents()
+        try:
+            async with asyncio.timeout(self._operation_timeout):
+                async with self._semaphore:
+                    # Try cache first
+                    if did in self.did_cache:
+                        doc, timestamp = self.did_cache[did]
+                        if time.time() - timestamp < self.cache_ttl:
+                            return doc
+                        else:
+                            del self.did_cache[did]  # Remove expired cache entry
+                    
+                    # Try memory
                     doc = self.did_documents.get(did)
                     if doc:
                         self.did_cache[did] = (doc, time.time())  # Update cache
-                    return doc
-                except Exception as e:
-                    print(f"Error resolving DID: {str(e)}")
-                    return None
+                        return doc
+                    
+                    # If not found, try to load from storage
+                    try:
+                        await self._load_documents()
+                        doc = self.did_documents.get(did)
+                        if doc:
+                            self.did_cache[did] = (doc, time.time())  # Update cache
+                        return doc
+                    except Exception as e:
+                        print(f"Error resolving DID: {str(e)}")
+                        return None
+        except asyncio.TimeoutError:
+            print(f"Operation timed out after {self._operation_timeout} seconds")
+            return None
     
     async def revoke_did(self, did: str) -> bool:
         """
@@ -192,6 +197,9 @@ class DIDManager:
                             del self.did_cache[did]
                         await self._save_documents()
                         return True
+            return False
+        except asyncio.TimeoutError:
+            print(f"Operation timed out after {self._operation_timeout} seconds")
             return False
         except Exception as e:
             print(f"Error revoking DID: {str(e)}")
