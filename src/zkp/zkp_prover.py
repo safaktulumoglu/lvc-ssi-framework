@@ -225,21 +225,26 @@ class ZKPProver:
         # Compute witness using Docker
         loop = asyncio.get_event_loop()
         try:
+            print(f"Computing witness for {circuit_name}")  # Debug logging
             result = await loop.run_in_executor(
                 self._executor,
                 lambda: self._run_zokrates_command([
                     'compute-witness',
-                    '-i', str(circuit_path),
-                    '-o', str(witness_path),
+                    '-i', circuit_path.name,
+                    '-o', witness_path.name,
                     '-a'
                 ] + [str(x) for x in witness_inputs])
             )
             if result.returncode != 0:
+                print(f"Witness computation failed with output: {result.stdout}")  # Debug logging
+                print(f"Witness computation failed with error: {result.stderr}")  # Debug logging
                 raise RuntimeError(f"Failed to compute witness: {result.stderr}")
             
+            print(f"Witness computation successful for {circuit_name}")  # Debug logging
             self._witness_cache[cache_key] = str(witness_path)
             return witness_path
         except subprocess.CalledProcessError as e:
+            print(f"Error computing witness: {e.stderr}")  # Debug logging
             raise RuntimeError(f"Failed to compute witness: {e.stderr}")
     
     async def generate_proof(self, credential: Dict[str, Any], proof_type: str, private_inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
