@@ -12,26 +12,13 @@ def setup_zokrates():
     """Setup ZoKrates based on the platform."""
     system = platform.system()
     
-    if system == "Windows":
-        # Check if ZoKrates is in PATH
-        try:
-            subprocess.run(['zokrates', '--version'], capture_output=True, check=True)
-            print("ZoKrates is already installed and in PATH")
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            print("Please install ZoKrates for Windows:")
-            print("1. Download from: https://github.com/Zokrates/ZoKrates/releases")
-            print("2. Extract the zip file")
-            print("3. Add the extracted directory to your system PATH")
-            print("4. Restart your terminal")
-            return False
-    else:
-        # For Linux/MacOS, use Docker
-        try:
-            subprocess.run(['docker', 'pull', 'zokrates/zokrates'], check=True)
-            print("ZoKrates Docker image pulled successfully")
-        except subprocess.CalledProcessError:
-            print("Failed to pull ZoKrates Docker image")
-            return False
+    # For Linux/MacOS, use Docker
+    try:
+        subprocess.run(['docker', 'pull', 'zokrates/zokrates'], check=True)
+        print("ZoKrates Docker image pulled successfully")
+    except subprocess.CalledProcessError:
+        print("Failed to pull ZoKrates Docker image")
+        return False
     
     return True
 
@@ -41,23 +28,16 @@ def compile_circuit():
     circuit_dir = os.path.join('src', 'circuits')
     abs_circuit_dir = os.path.abspath(circuit_dir)
     
-    if system == "Windows":
-        commands = [
-            ['zokrates', 'compile', '-i', 'access_control.zok'],
-            ['zokrates', 'setup'],
-            ['zokrates', 'export-verifier']
-        ]
-    else:
-        # Use Docker for Linux/MacOS
-        # Note: Using /home/zokrates/.zokrates/bin/zokrates for the executable path
-        commands = [
-            ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
-             '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'compile', '-i', 'access_control.zok'],
-            ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
-             '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'setup'],
-            ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
-             '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'export-verifier']
-        ]
+    # Use Docker for Linux/MacOS
+    # Note: Using /home/zokrates/.zokrates/bin/zokrates for the executable path
+    commands = [
+        ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
+         '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'compile', '-i', 'access_control.zok'],
+        ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
+         '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'setup'],
+        ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
+         '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'export-verifier']
+    ]
     
     try:
         for cmd in commands:
