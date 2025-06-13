@@ -12,7 +12,6 @@ def setup_zokrates():
     """Setup ZoKrates based on the platform."""
     system = platform.system()
     
-    # For Linux/MacOS, use Docker
     try:
         subprocess.run(['docker', 'pull', 'zokrates/zokrates'], check=True)
         print("ZoKrates Docker image pulled successfully")
@@ -28,8 +27,6 @@ def compile_circuit():
     circuit_dir = os.path.join('src', 'circuits')
     abs_circuit_dir = os.path.abspath(circuit_dir)
     
-    # Use Docker for Linux/MacOS
-    # Note: Using /home/zokrates/.zokrates/bin/zokrates for the executable path
     commands = [
         ['docker', 'run', '-v', f'{abs_circuit_dir}:/home/zokrates/code', 
          '-w', '/home/zokrates/code', 'zokrates/zokrates', '/home/zokrates/.zokrates/bin/zokrates', 'compile', '-i', 'access_control.zok'],
